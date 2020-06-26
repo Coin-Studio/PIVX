@@ -48,7 +48,6 @@ struct Params {
     // height-based activations
     int height_last_PoW;
     int height_last_ZC_AccumCheckpoint;
-    int height_last_ZC_WrappedSerials;
     int height_start_BIP65;                         // Blocks v5 start
     
     int height_start_MessSignaturesV2;
@@ -109,7 +108,6 @@ struct Params {
     CAmount ZC_MinMintFee;
     int ZC_MinStakeDepth;
     int ZC_TimeStart;
-    CAmount ZC_WrappedSerialsSupply;
 
     libzerocoin::ZerocoinParams* Zerocoin_Params(bool useModulusV1) const
     {

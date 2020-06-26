@@ -399,13 +399,6 @@ bool UpdateZPIVSupplyConnect(const CBlock& block, CBlockIndex* pindex, bool fJus
             return error("Block contains zerocoins that spend more than are in the available supply to spend");
     }
 
-    // Update Wrapped Serials amount
-    // A one-time event where only the zPIV supply was off (due to serial duplication off-chain on main net)
-    if (Params().NetworkID() == CBaseChainParams::MAIN && pindex->nHeight == consensus.height_last_ZC_WrappedSerials + 1) {
-        for (const libzerocoin::CoinDenomination& denom : libzerocoin::zerocoinDenomList)
-            mapZerocoinSupply.at(denom) += GetWrapppedSerialInflation(denom);
-    }
-
     for (const libzerocoin::CoinDenomination& denom : libzerocoin::zerocoinDenomList)
         LogPrint(BCLog::LEGACYZC, "%s coins for denomination %d pubcoin %s\n", __func__, denom, mapZerocoinSupply.at(denom));
 
@@ -419,13 +412,6 @@ bool UpdateZPIVSupplyDisconnect(const CBlock& block, CBlockIndex* pindex)
     const Consensus::Params& consensus = Params().GetConsensus();
     if (pindex->nHeight < consensus.height_start_ZC)
         return true;
-
-    // Undo Update Wrapped Serials amount
-    // A one-time event where only the zPIV supply was off (due to serial duplication off-chain on main net)
-    if (Params().NetworkID() == CBaseChainParams::MAIN && pindex->nHeight == consensus.height_last_ZC_WrappedSerials + 1) {
-        for (const libzerocoin::CoinDenomination& denom : libzerocoin::zerocoinDenomList)
-            mapZerocoinSupply.at(denom) -= GetWrapppedSerialInflation(denom);
-    }
 
     // Re-add spends to zPIV supply
     std::list<libzerocoin::CoinDenomination> listDenomsSpent = ZerocoinSpendListFromBlock(block);

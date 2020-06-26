@@ -552,7 +552,7 @@ WalletModel::SendCoinsReturn WalletModel::sendCoins(WalletModelTransaction& tran
 
     // Double check tx before do anything
     CValidationState state;
-    if (!CheckTransaction(*transaction.getTransaction(), true, true, state, true, fColdStakingActive)) {
+    if (!CheckTransaction(*transaction.getTransaction(), true, state, fColdStakingActive)) {
         return TransactionCommitFailed;
     }
 
@@ -650,7 +650,7 @@ bool WalletModel::createZpivSpend(
 
     // Double check tx before do anything
     CValidationState state;
-    return CheckTransaction(wtxNew, true, true, state, true);
+    return CheckTransaction(wtxNew, true, state);
 }
 
 bool WalletModel::sendZpiv(
