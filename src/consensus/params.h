@@ -56,7 +56,6 @@ struct Params {
     int height_start_StakeModifierV2;               // Blocks v6 start
     int height_start_TimeProtoV2;                   // Blocks v7 start
     int height_start_ZC;                            // Blocks v4 start
-    int height_start_ZC_InvalidSerials;
     int height_start_ZC_PublicSpends;
     int height_start_ZC_SerialRangeCheck;
     int height_start_ZC_SerialsV2;
