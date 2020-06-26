@@ -5,7 +5,6 @@
 #include "zpivchain.h"
 
 #include "guiinterface.h"
-#include "invalid.h"
 #include "main.h"
 #include "txdb.h"
 #include "wallet/wallet.h"
@@ -321,7 +320,7 @@ bool TxOutToPublicCoin(const CTxOut& txout, libzerocoin::PublicCoin& pubCoin, CV
 }
 
 //return a list of zerocoin spends contained in a specific block, list may have many denominations
-std::list<libzerocoin::CoinDenomination> ZerocoinSpendListFromBlock(const CBlock& block, bool fFilterInvalid)
+std::list<libzerocoin::CoinDenomination> ZerocoinSpendListFromBlock(const CBlock& block)
 {
     std::list<libzerocoin::CoinDenomination> vSpends;
     for (const CTransaction& tx : block.vtx) {
@@ -332,12 +331,6 @@ std::list<libzerocoin::CoinDenomination> ZerocoinSpendListFromBlock(const CBlock
             bool isPublicSpend = txin.IsZerocoinPublicSpend();
             if (!txin.IsZerocoinSpend() && !isPublicSpend)
                 continue;
-
-            if (fFilterInvalid && !isPublicSpend) {
-                libzerocoin::CoinSpend spend = TxInToZerocoinSpend(txin);
-                if (invalid_out::ContainsSerial(spend.getCoinSerialNumber()))
-                    continue;
-            }
 
             libzerocoin::CoinDenomination c = libzerocoin::IntToZerocoinDenomination(txin.nSequence);
             vSpends.push_back(c);
@@ -398,7 +391,7 @@ bool UpdateZPIVSupplyConnect(const CBlock& block, CBlockIndex* pindex, bool fJus
     }
 
     //Remove spends from zPIV supply
-    std::list<libzerocoin::CoinDenomination> listDenomsSpent = ZerocoinSpendListFromBlock(block, true);
+    std::list<libzerocoin::CoinDenomination> listDenomsSpent = ZerocoinSpendListFromBlock(block);
     for (const libzerocoin::CoinDenomination& denom : listDenomsSpent) {
         mapZerocoinSupply.at(denom)--;
         // zerocoin failsafe
@@ -435,7 +428,7 @@ bool UpdateZPIVSupplyDisconnect(const CBlock& block, CBlockIndex* pindex)
     }
 
     // Re-add spends to zPIV supply
-    std::list<libzerocoin::CoinDenomination> listDenomsSpent = ZerocoinSpendListFromBlock(block, true);
+    std::list<libzerocoin::CoinDenomination> listDenomsSpent = ZerocoinSpendListFromBlock(block);
     for (const libzerocoin::CoinDenomination& denom : listDenomsSpent) {
         mapZerocoinSupply.at(denom)++;
     }

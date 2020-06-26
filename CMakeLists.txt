@@ -471,7 +471,6 @@ set(COMMON_SOURCES
         ./src/core_read.cpp
         ./src/core_write.cpp
         ./src/hash.cpp
-        ./src/invalid.cpp
         ./src/key.cpp
         ./src/keystore.cpp
         ./src/netbase.cpp

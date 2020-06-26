@@ -8,7 +8,6 @@
 #include "consensus/consensus.h"
 #include "guiinterface.h"        // for ui_interface
 #include "init.h"                // for ShutdownRequested()
-#include "invalid.h"
 #include "main.h"
 #include "script/interpreter.h"
 #include "spork.h"               // for sporkManager
@@ -254,19 +253,6 @@ bool RecalculatePIVSupply(int nHeightStart, bool fSkipZpiv)
             UpdateZPIVSupplyConnect(block, pindex, true);
         }
 
-        // Add fraudulent funds to the supply and remove any recovered funds.
-        if (pindex->nHeight == consensus.height_ZC_RecalcAccumulators) {
-            const CAmount nInvalidAmountFiltered = 268200*COIN;    //Amount of invalid coins filtered through exchanges, that should be considered valid
-            LogPrintf("%s : Original money supply=%s\n", __func__, FormatMoney(nMoneySupply));
-
-            nMoneySupply += nInvalidAmountFiltered;
-            LogPrintf("%s : Adding filtered funds to supply + %s : supply=%s\n", __func__, FormatMoney(nInvalidAmountFiltered), FormatMoney(nMoneySupply));
-
-            CAmount nLocked = GetInvalidUTXOValue();
-            nMoneySupply -= nLocked;
-            LogPrintf("%s : Removing locked from supply - %s : supply=%s\n", __func__, FormatMoney(nLocked), FormatMoney(nMoneySupply));
-        }
-
         assert(pblocktree->WriteBlockIndex(CDiskBlockIndex(pindex)));
 
         // Stop if shutdown was requested
@@ -279,21 +265,4 @@ bool RecalculatePIVSupply(int nHeightStart, bool fSkipZpiv)
     }
     uiInterface.ShowProgress("", 100);
     return true;
-}
-
-CAmount GetInvalidUTXOValue()
-{
-    CAmount nValue = 0;
-    for (auto out : invalid_out::setInvalidOutPoints) {
-        bool fSpent = false;
-        CCoinsViewCache cache(pcoinsTip);
-        const CCoins *coins = cache.AccessCoins(out.hash);
-        if(!coins || !coins->IsAvailable(out.n))
-            fSpent = true;
-
-        if (!fSpent)
-            nValue += coins->vout[out.n].nValue;
-    }
-
-    return nValue;
 }

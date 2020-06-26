@@ -40,7 +40,6 @@
 #include "validationinterface.h"
 #include "zpivchain.h"
 
-#include "invalid.h"
 #include "libzerocoin/Denominations.h"
 #include "masternode-sync.h"
 #include "zpiv/zerocoin.h"
@@ -2502,15 +2501,6 @@ bool ConnectBlock(const CBlock& block, CValidationState& state, CBlockIndex* pin
     if (Params().NetworkID() == CBaseChainParams::MAIN && pindex->nHeight == consensus.height_last_ZC_WrappedSerials + 1
             && GetZerocoinSupply() != consensus.ZC_WrappedSerialsSupply + GetWrapppedSerialInflationAmount()) {
         RecalculatePIVSupply(consensus.height_start_ZC, false);
-    }
-
-    // Add fraudulent funds to the supply and remove any recovered funds.
-    if (Params().NetworkID() == CBaseChainParams::MAIN && pindex->nHeight == consensus.height_ZC_RecalcAccumulators) {
-        LogPrintf("%s : Adding fraudulent funds at height_ZC_RecalcAccumulators\n", __func__);
-        const CAmount nInvalidAmountFiltered = 268200*COIN;    //Amount of invalid coins filtered through exchanges, that should be considered valid
-        nMoneySupply += nInvalidAmountFiltered;
-        CAmount nLocked = GetInvalidUTXOValue();
-        nMoneySupply -= nLocked;
     }
 
     // Update PIV money supply
