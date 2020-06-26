@@ -1683,7 +1683,7 @@ int CWallet::ScanForWalletTransactions(CBlockIndex* pindexStart, bool fUpdate, b
             //If this is a zapwallettx, need to readd zpiv
             if (fCheckZPIV && pindex->nHeight >= Params().GetConsensus().height_start_ZC) {
                 std::list<CZerocoinMint> listMints;
-                BlockToZerocoinMintList(block, listMints, true);
+                BlockToZerocoinMintList(block, listMints);
                 CWalletDB walletdb(strWalletFile);
 
                 for (auto& m : listMints) {

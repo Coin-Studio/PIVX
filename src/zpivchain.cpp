@@ -43,73 +43,14 @@ bool BlockToMintValueVector(const CBlock& block, const libzerocoin::CoinDenomina
     return true;
 }
 
-bool BlockToPubcoinList(const CBlock& block, std::list<libzerocoin::PublicCoin>& listPubcoins, bool fFilterInvalid)
-{
-    for (const CTransaction& tx : block.vtx) {
-        if(!tx.HasZerocoinMintOutputs())
-            continue;
-
-        // Filter out mints that have used invalid outpoints
-        if (fFilterInvalid) {
-            bool fValid = true;
-            for (const CTxIn& in : tx.vin) {
-                if (!ValidOutPoint(in.prevout, INT_MAX)) {
-                    fValid = false;
-                    break;
-                }
-            }
-            if (!fValid)
-                continue;
-        }
-
-        uint256 txHash = tx.GetHash();
-        for (unsigned int i = 0; i < tx.vout.size(); i++) {
-            //Filter out mints that use invalid outpoints - edge case: invalid spend with minted change
-            if (fFilterInvalid && !ValidOutPoint(COutPoint(txHash, i), INT_MAX))
-                break;
-
-            const CTxOut txOut = tx.vout[i];
-            if(!txOut.IsZerocoinMint())
-                continue;
-
-            CValidationState state;
-            libzerocoin::PublicCoin pubCoin(Params().GetConsensus().Zerocoin_Params(false));
-            if(!TxOutToPublicCoin(txOut, pubCoin, state))
-                return false;
-
-            listPubcoins.emplace_back(pubCoin);
-        }
-    }
-
-    return true;
-}
-
 //return a list of zerocoin mints contained in a specific block
-bool BlockToZerocoinMintList(const CBlock& block, std::list<CZerocoinMint>& vMints, bool fFilterInvalid)
+bool BlockToZerocoinMintList(const CBlock& block, std::list<CZerocoinMint>& vMints)
 {
     for (const CTransaction& tx : block.vtx) {
         if(!tx.HasZerocoinMintOutputs())
             continue;
 
-        // Filter out mints that have used invalid outpoints
-        if (fFilterInvalid) {
-            bool fValid = true;
-            for (const CTxIn& in : tx.vin) {
-                if (!ValidOutPoint(in.prevout, INT_MAX)) {
-                    fValid = false;
-                    break;
-                }
-            }
-            if (!fValid)
-                continue;
-        }
-
-        uint256 txHash = tx.GetHash();
         for (unsigned int i = 0; i < tx.vout.size(); i++) {
-            //Filter out mints that use invalid outpoints - edge case: invalid spend with minted change
-            if (fFilterInvalid && !ValidOutPoint(COutPoint(txHash, i), INT_MAX))
-                break;
-
             const CTxOut txOut = tx.vout[i];
             if(!txOut.IsZerocoinMint())
                 continue;
@@ -431,7 +372,7 @@ bool UpdateZPIVSupplyConnect(const CBlock& block, CBlockIndex* pindex, bool fJus
     if (pindex->nHeight < consensus.height_last_ZC_AccumCheckpoint) {
         std::list<CZerocoinMint> listMints;
         std::set<uint256> setAddedToWallet;
-        BlockToZerocoinMintList(block, listMints, true);
+        BlockToZerocoinMintList(block, listMints);
         for (const CZerocoinMint& m : listMints) {
             mapZerocoinSupply.at(m.GetDenomination())++;
             //Remove any of our own mints from the mintpool
@@ -503,7 +444,7 @@ bool UpdateZPIVSupplyDisconnect(const CBlock& block, CBlockIndex* pindex)
     if (pindex->nHeight < consensus.height_last_ZC_AccumCheckpoint) {
         std::list<CZerocoinMint> listMints;
         std::set<uint256> setAddedToWallet;
-        BlockToZerocoinMintList(block, listMints, true);
+        BlockToZerocoinMintList(block, listMints);
         for (const CZerocoinMint& m : listMints) {
             const libzerocoin::CoinDenomination denom = m.GetDenomination();
             mapZerocoinSupply.at(denom)--;
