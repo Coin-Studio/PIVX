@@ -197,7 +197,7 @@ public:
         consensus.height_start_ZC_PublicSpends = 1880000;
         consensus.height_start_ZC_SerialRangeCheck = 895400;
         consensus.height_start_ZC_SerialsV2 = 1153160;
-        consensus.height_ZC_RecalcAccumulators = 908000;
+        
 
         // validation by-pass
         consensus.nPivxBadBlockTime = 1471401614;    // Skip nBit validation of Block 259201 per PR #915
@@ -310,7 +310,7 @@ public:
         consensus.height_start_ZC_PublicSpends = 1106100;
         consensus.height_start_ZC_SerialRangeCheck = 1;
         consensus.height_start_ZC_SerialsV2 = 444020;
-        consensus.height_ZC_RecalcAccumulators = 999999999;
+        
 
         // validation by-pass
         consensus.nPivxBadBlockTime = 1489001494; // Skip nBit validation of Block 201 per PR #915
@@ -431,7 +431,7 @@ public:
         consensus.height_start_ZC_PublicSpends = 400;
         consensus.height_start_ZC_SerialRangeCheck = 300;
         consensus.height_start_ZC_SerialsV2 = 300;
-        consensus.height_ZC_RecalcAccumulators = 999999999;
+        
 
         // Zerocoin-related params
         consensus.ZC_Modulus = "25195908475657893494027183240048398571429282126204032027777137836043662020707595556264018525880784"

@@ -58,7 +58,7 @@ struct Params {
     int height_start_ZC_PublicSpends;
     int height_start_ZC_SerialRangeCheck;
     int height_start_ZC_SerialsV2;
-    int height_ZC_RecalcAccumulators;
+
 
     // validation by-pass
     int64_t nPivxBadBlockTime;
