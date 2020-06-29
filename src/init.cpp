@@ -19,7 +19,6 @@
 #include "amount.h"
 #include "checkpoints.h"
 #include "compat/sanity.h"
-#include "consensus/zerocoin_verify.h"
 #include "httpserver.h"
 #include "httprpc.h"
 #include "key.h"
@@ -44,7 +43,7 @@
 #include "utilmoneystr.h"
 #include "util/threadnames.h"
 #include "validationinterface.h"
-#include "zpivchain.h"
+
 
 #ifdef ENABLE_WALLET
 #include "wallet/db.h"
@@ -74,7 +73,6 @@
 
 
 #ifdef ENABLE_WALLET
-CzPIVWallet* zwalletMain = NULL;
 int nWalletBackups = 10;
 #endif
 volatile bool fFeeEstimatesInitialized = false;
@@ -244,8 +242,6 @@ void PrepareShutdown()
         pcoinsdbview = NULL;
         delete pblocktree;
         pblocktree = NULL;
-        delete zerocoinDB;
-        zerocoinDB = NULL;
         delete pSporkDB;
         pSporkDB = NULL;
     }
@@ -293,9 +289,7 @@ void Shutdown()
     StopTorControl();
 #ifdef ENABLE_WALLET
     delete pwalletMain;
-    pwalletMain = NULL;
-    delete zwalletMain;
-    zwalletMain = NULL;
+    pwalletMain = NULL;    
 #endif
     globalVerifyHandle.reset();
     ECC_Stop();
@@ -525,14 +519,13 @@ std::string HelpMessage(HelpMessageMode mode)
     }
     strUsage += HelpMessageOpt("-shrinkdebugfile", _("Shrink debug.log file on client startup (default: 1 when no -debug)"));
     strUsage += HelpMessageOpt("-testnet", _("Use the test network"));
-    strUsage += HelpMessageOpt("-litemode=<n>", strprintf(_("Disable all PIVX specific functionality (Masternodes, Zerocoin, SwiftX, Budgeting) (0-1, default: %u)"), 0));
+    strUsage += HelpMessageOpt("-litemode=<n>", strprintf(_("Disable all PIVX specific functionality (Masternodes, SwiftX, Budgeting) (0-1, default: %u)"), 0));
 
 #ifdef ENABLE_WALLET
     strUsage += HelpMessageGroup(_("Staking options:"));
     strUsage += HelpMessageOpt("-staking=<n>", strprintf(_("Enable staking functionality (0-1, default: %u)"), 1));
     strUsage += HelpMessageOpt("-coldstaking=<n>", strprintf(_("Enable cold staking functionality (0-1, default: %u). Disabled if staking=0"), 1));
     strUsage += HelpMessageOpt("-pivstake=<n>", strprintf(_("Enable or disable staking functionality for PIV inputs (0-1, default: %u)"), 1));
-    strUsage += HelpMessageOpt("-zpivstake=<n>", strprintf(_("Enable or disable staking functionality for zPIV inputs (0-1, default: %u)"), 1));
     strUsage += HelpMessageOpt("-reservebalance=<amt>", _("Keep the specified amount available for spending at all times (default: 0)"));
     if (GetBoolArg("-help-debug", false)) {
         strUsage += HelpMessageOpt("-printstakemodifier", _("Display the stake modifier calculations in the debug.log file."));
@@ -547,9 +540,6 @@ std::string HelpMessage(HelpMessageMode mode)
     strUsage += HelpMessageOpt("-masternodeprivkey=<n>", _("Set the masternode private key"));
     strUsage += HelpMessageOpt("-masternodeaddr=<n>", strprintf(_("Set external address:port to get to this masternode (example: %s)"), "128.127.106.235:51472"));
     strUsage += HelpMessageOpt("-budgetvotemode=<mode>", _("Change automatic finalized budget voting behavior. mode=auto: Vote for only exact finalized budget match to my generated budget. (string, default: auto)"));
-
-    strUsage += HelpMessageGroup(_("Zerocoin options:"));
-    strUsage += HelpMessageOpt("-reindexzerocoin=<n>", strprintf(_("Delete all zerocoin spends and mints that have been recorded to the blockchain database and reindex them (0-1, default: %u)"), 0));
 
     strUsage += HelpMessageGroup(_("SwiftX options:"));
     strUsage += HelpMessageOpt("-enableswifttx=<n>", strprintf(_("Enable SwiftX, show confirmations for locked transactions (bool, default: %s)"), "true"));
@@ -1447,11 +1437,9 @@ bool AppInit2()
                 delete pcoinsdbview;
                 delete pcoinscatcher;
                 delete pblocktree;
-                delete zerocoinDB;
                 delete pSporkDB;
 
                 //PIVX specific: zerocoin and spork DB's
-                zerocoinDB = new CZerocoinDB(0, false, fReindex);
                 pSporkDB = new CSporkDB(0, false, false);
 
                 pblocktree = new CBlockTreeDB(nBlockTreeDBCache, false, fReindex);
@@ -1497,45 +1485,12 @@ bool AppInit2()
                     break;
                 }
 
-                bool fReindexZerocoin = GetBoolArg("-reindexzerocoin", false);
-
                 int chainHeight;
                 {
                     LOCK(cs_main);
                     chainHeight = chainActive.Height();
-
-                    // initialize PIV and zPIV supply to 0
-                    mapZerocoinSupply.clear();
-                    for (auto& denom : libzerocoin::zerocoinDenomList) mapZerocoinSupply.insert(std::make_pair(denom, 0));
+                    
                     nMoneySupply = 0;
-
-                    // Load PIV and zPIV supply from DB
-                    if (chainHeight >= 0) {
-                        const uint256& tipHash = chainActive[chainHeight]->GetBlockHash();
-                        CLegacyBlockIndex bi;
-
-                        // Load zPIV supply map
-                        if (!fReindexZerocoin && chainHeight >= consensus.height_start_ZC && !zerocoinDB->ReadZCSupply(mapZerocoinSupply)) {
-                            // try first reading legacy block index from DB
-                            if (pblocktree->ReadLegacyBlockIndex(tipHash, bi) && !bi.mapZerocoinSupply.empty()) {
-                                mapZerocoinSupply = bi.mapZerocoinSupply;
-                            } else {
-                                // reindex from disk
-                                fReindexZerocoin = true;
-                            }
-                        }
-                    }
-                }
-
-                // Drop all information from the zerocoinDB and repopulate
-                if (fReindexZerocoin && chainHeight >= consensus.height_start_ZC) {
-                    LOCK(cs_main);
-                    uiInterface.InitMessage(_("Reindexing zerocoin database..."));
-                    std::string strError = ReindexZerocoinDB();
-                    if (strError != "") {
-                        strLoadError = strError;
-                        break;
-                    }
                 }
 
                 if (!fReindex) {
@@ -1556,7 +1511,6 @@ bool AppInit2()
                         }
                     }
 
-                    // Zerocoin must check at level 4
                     if (!CVerifyDB().VerifyDB(pcoinsdbview, 4, GetArg("-checkblocks", 10))) {
                         strLoadError = _("Corrupted block database detected");
                         fVerifyingBlocks = false;
@@ -1613,7 +1567,6 @@ bool AppInit2()
 #ifdef ENABLE_WALLET
     if (fDisableWallet) {
         pwalletMain = NULL;
-        zwalletMain = NULL;
         LogPrintf("Wallet disabled!\n");
     } else {
         // needed to restore wallet transaction meta data after -zapwallettxes
@@ -1722,8 +1675,6 @@ bool AppInit2()
 
         LogPrintf("Init errors: %s\n", strErrors.str());
         LogPrintf("Wallet completed loading in %15dms\n", GetTimeMillis() - nWalletStartTime);
-        zwalletMain = new CzPIVWallet(pwalletMain);
-        pwalletMain->setZWallet(zwalletMain);
 
         RegisterValidationInterface(pwalletMain);
 
@@ -1771,16 +1722,6 @@ bool AppInit2()
             }
         }
         fVerifyingBlocks = false;
-
-        if (!zwalletMain->GetMasterSeed().IsNull()) {
-            //Inititalize zPIVWallet
-            uiInterface.InitMessage(_("Syncing zPIV wallet..."));
-
-            //Load zerocoin mint hashes to memory
-            pwalletMain->zpivTracker->Init();
-            zwalletMain->LoadMintPoolFromDB();
-            zwalletMain->SyncWithChain();
-        }
     }  // (!fDisableWallet)
 #else  // ENABLE_WALLET
     LogPrintf("No wallet compiled in!\n");

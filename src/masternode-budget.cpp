@@ -937,8 +937,6 @@ CAmount CBudgetManager::GetTotalBudget(int nHeight)
         nSubsidy = 15 * COIN;
     } else if (nHeight <= 647999 && nHeight >= 604800) {
         nSubsidy = 10 * COIN;
-    } else if (nHeight >= Params().GetConsensus().height_start_ZC_SerialsV2) {
-        nSubsidy = 10 * COIN;
     } else {
         nSubsidy = 5 * COIN;
     }

@@ -320,7 +320,7 @@ bool IsBlockPayeeValid(const CBlock& block, int nBlockHeight)
 }
 
 
-void FillBlockPayee(CMutableTransaction& txNew, CAmount nFees, bool fProofOfStake, bool fZPIVStake)
+void FillBlockPayee(CMutableTransaction& txNew, CAmount nFees, bool fProofOfStake)
 {
     CBlockIndex* pindexPrev = chainActive.Tip();
     if (!pindexPrev) return;
@@ -328,7 +328,7 @@ void FillBlockPayee(CMutableTransaction& txNew, CAmount nFees, bool fProofOfStak
     if (sporkManager.IsSporkActive(SPORK_13_ENABLE_SUPERBLOCKS) && budget.IsBudgetPaymentBlock(pindexPrev->nHeight + 1)) {
         budget.FillBlockPayee(txNew, nFees, fProofOfStake);
     } else {
-        masternodePayments.FillBlockPayee(txNew, nFees, fProofOfStake, fZPIVStake);
+        masternodePayments.FillBlockPayee(txNew, nFees, fProofOfStake);
     }
 }
 
@@ -341,7 +341,7 @@ std::string GetRequiredPaymentsString(int nBlockHeight)
     }
 }
 
-void CMasternodePayments::FillBlockPayee(CMutableTransaction& txNew, int64_t nFees, bool fProofOfStake, bool fZPIVStake)
+void CMasternodePayments::FillBlockPayee(CMutableTransaction& txNew, int64_t nFees, bool fProofOfStake)
 {
     CBlockIndex* pindexPrev = chainActive.Tip();
     if (!pindexPrev) return;
@@ -377,22 +377,20 @@ void CMasternodePayments::FillBlockPayee(CMutableTransaction& txNew, int64_t nFe
             txNew.vout[i].nValue = masternodePayment;
 
             //subtract mn payment from the stake reward
-            if (!txNew.vout[1].IsZerocoinMint()) {
-                if (i == 2) {
-                    // Majority of cases; do it quick and move on
-                    txNew.vout[i - 1].nValue -= masternodePayment;
-                } else if (i > 2) {
-                    // special case, stake is split between (i-1) outputs
-                    unsigned int outputs = i-1;
-                    CAmount mnPaymentSplit = masternodePayment / outputs;
-                    CAmount mnPaymentRemainder = masternodePayment - (mnPaymentSplit * outputs);
-                    for (unsigned int j=1; j<=outputs; j++) {
-                        txNew.vout[j].nValue -= mnPaymentSplit;
-                    }
-                    // in case it's not an even division, take the last bit of dust from the last one
-                    txNew.vout[outputs].nValue -= mnPaymentRemainder;
-                }
-            }
+			if (i == 2) {
+				// Majority of cases; do it quick and move on
+				txNew.vout[i - 1].nValue -= masternodePayment;
+			} else if (i > 2) {
+				// special case, stake is split between (i-1) outputs
+				unsigned int outputs = i-1;
+				CAmount mnPaymentSplit = masternodePayment / outputs;
+				CAmount mnPaymentRemainder = masternodePayment - (mnPaymentSplit * outputs);
+				for (unsigned int j=1; j<=outputs; j++) {
+					txNew.vout[j].nValue -= mnPaymentSplit;
+				}
+				// in case it's not an even division, take the last bit of dust from the last one
+				txNew.vout[outputs].nValue -= mnPaymentRemainder;
+			}
         } else {
             txNew.vout.resize(2);
             txNew.vout[1].scriptPubKey = payee;

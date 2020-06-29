@@ -615,14 +615,12 @@ void TopBar::updateDisplayUnit()
         nDisplayUnit = walletModel->getOptionsModel()->getDisplayUnit();
         if (displayUnitPrev != nDisplayUnit)
             updateBalances(walletModel->getBalance(), walletModel->getUnconfirmedBalance(), walletModel->getImmatureBalance(),
-                           walletModel->getZerocoinBalance(), walletModel->getUnconfirmedZerocoinBalance(), walletModel->getImmatureZerocoinBalance(),
                            walletModel->getWatchBalance(), walletModel->getWatchUnconfirmedBalance(), walletModel->getWatchImmatureBalance(),
                            walletModel->getDelegatedBalance(), walletModel->getColdStakedBalance());
     }
 }
 
-void TopBar::updateBalances(const CAmount& balance, const CAmount& unconfirmedBalance, const CAmount& immatureBalance,
-                            const CAmount& zerocoinBalance, const CAmount& unconfirmedZerocoinBalance, const CAmount& immatureZerocoinBalance,
+void TopBar::updateBalances(const CAmount& balance, const CAmount& unconfirmedBalance, const CAmount& immatureBalance,                            
                             const CAmount& watchOnlyBalance, const CAmount& watchUnconfBalance, const CAmount& watchImmatureBalance,
                             const CAmount& delegatedBalance, const CAmount& coldStakedBalance)
 {
@@ -635,12 +633,10 @@ void TopBar::updateBalances(const CAmount& balance, const CAmount& unconfirmedBa
 
     // PIV Total
     CAmount pivAvailableBalance = balance;
-    // zPIV Balance
-    CAmount matureZerocoinBalance = zerocoinBalance - unconfirmedZerocoinBalance - immatureZerocoinBalance;
 
     // Set
     QString totalPiv = GUIUtil::formatBalance(pivAvailableBalance, nDisplayUnit);
-    QString totalzPiv = GUIUtil::formatBalance(matureZerocoinBalance, nDisplayUnit, true);
+    
 
     // PIV
     // Top
@@ -651,20 +647,13 @@ void TopBar::updateBalances(const CAmount& balance, const CAmount& unconfirmedBa
     ui->labelImmaturePiv->setText(GUIUtil::formatBalance(immatureBalance, nDisplayUnit));
 
     // Update display state and/or values for zPIV balances as necessary
-    bool fHaveZerocoins = zerocoinBalance > 0;
+    bool fHaveZerocoins = false;
 
     // Set visibility of zPIV label titles/values
     ui->typeSpacerTop->setVisible(fHaveZerocoins);
     ui->typeSpacerExpanded->setVisible(fHaveZerocoins);
     ui->labelAmountTopzPiv->setVisible(fHaveZerocoins);
     ui->zerocoinBalances->setVisible(fHaveZerocoins);
-
-    // Top
-    ui->labelAmountTopzPiv->setText(totalzPiv);
-    // Expanded
-    ui->labelAvailablezPiv->setText(totalzPiv);
-    ui->labelPendingzPiv->setText(GUIUtil::formatBalance(unconfirmedZerocoinBalance, nDisplayUnit, true));
-    ui->labelImmaturezPiv->setText(GUIUtil::formatBalance(immatureZerocoinBalance, nDisplayUnit, true));
 }
 
 void TopBar::resizeEvent(QResizeEvent *event)

@@ -24,8 +24,6 @@
 #include "pow.h"
 #include "primitives/block.h"
 #include "primitives/transaction.h"
-#include "zpiv/zerocoin.h"
-#include "zpiv/zpivmodule.h"
 #include "script/script.h"
 #include "script/sigcache.h"
 #include "script/standard.h"
@@ -45,13 +43,10 @@
 #include <utility>
 #include <vector>
 
-#include "libzerocoin/CoinSpend.h"
-
 #include <boost/unordered_map.hpp>
 
 class CBlockIndex;
 class CBlockTreeDB;
-class CZerocoinDB;
 class CSporkDB;
 class CBloomFilter;
 class CInv;
@@ -394,9 +389,6 @@ extern CCoinsViewCache* pcoinsTip;
 
 /** Global variable that points to the active block tree (protected by cs_main) */
 extern CBlockTreeDB* pblocktree;
-
-/** Global variable that points to the zerocoin database (protected by cs_main) */
-extern CZerocoinDB* zerocoinDB;
 
 /** Global variable that points to the spork database (protected by cs_main) */
 extern CSporkDB* pSporkDB;

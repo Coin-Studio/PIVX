@@ -19,7 +19,6 @@
 #include "consensus/merkle.h"
 #include "consensus/tx_verify.h"
 #include "consensus/validation.h"
-#include "consensus/zerocoin_verify.h"
 #include "init.h"
 #include "kernel.h"
 #include "masternode-budget.h"
@@ -38,11 +37,8 @@
 #include "util.h"
 #include "utilmoneystr.h"
 #include "validationinterface.h"
-#include "zpivchain.h"
 
-#include "libzerocoin/Denominations.h"
 #include "masternode-sync.h"
-#include "zpiv/zerocoin.h"
 #include <sstream>
 
 #include <boost/algorithm/string/replace.hpp>
@@ -624,7 +620,6 @@ CBlockIndex* FindForkInGlobalIndex(const CChain& chain, const CBlockLocator& loc
 
 CCoinsViewCache* pcoinsTip = NULL;
 CBlockTreeDB* pblocktree = NULL;
-CZerocoinDB* zerocoinDB = NULL;
 CSporkDB* pSporkDB = NULL;
 
 //////////////////////////////////////////////////////////////////////////////
@@ -742,15 +737,12 @@ bool IsStandardTx(const CTransaction& tx, std::string& reason)
     // computing signature hashes is O(ninputs*txsize). Limiting transactions
     // to MAX_STANDARD_TX_SIZE mitigates CPU exhaustion attacks.
     unsigned int sz = tx.GetSerializeSize(SER_NETWORK, CTransaction::CURRENT_VERSION);
-    unsigned int nMaxSize = tx.ContainsZerocoins() ? MAX_ZEROCOIN_TX_SIZE : MAX_STANDARD_TX_SIZE;
-    if (sz >= nMaxSize) {
+    if (sz >= MAX_STANDARD_TX_SIZE) {
         reason = "tx-size";
         return false;
     }
 
     for (const CTxIn& txin : tx.vin) {
-        if (txin.IsZerocoinSpend() || txin.IsZerocoinPublicSpend())
-            continue;
         // Biggest 'standard' txin is a 15-of-15 P2SH multisig with compressed
         // keys. (remember the 520 byte limit on redeemScript size) That works
         // out to a (15*(33+1))+3=513 byte redeemScript, 513+1+15*(73+1)+3=1627
@@ -807,7 +799,7 @@ bool IsStandardTx(const CTransaction& tx, std::string& reason)
  */
 bool AreInputsStandard(const CTransaction& tx, const CCoinsViewCache& mapInputs)
 {
-    if (tx.IsCoinBase() || tx.HasZerocoinSpendInputs())
+    if (tx.IsCoinBase())
         return true; // coinbase has no inputs and zerocoinspend has a special input
     //todo should there be a check for a 'standard' zerocoinspend here?
 
@@ -959,17 +951,11 @@ bool AcceptToMemoryPool(CTxMemPool& pool, CValidationState& state, const CTransa
     if (pfMissingInputs)
         *pfMissingInputs = false;
 
-    //Temporarily disable zerocoin for maintenance
-    if (sporkManager.IsSporkActive(SPORK_16_ZEROCOIN_MAINTENANCE_MODE) && tx.ContainsZerocoins())
-        return state.DoS(10, error("%s : Zerocoin transactions are temporarily disabled for maintenance",
-                __func__), REJECT_INVALID, "bad-tx");
-
-    const Consensus::Params& consensus = Params().GetConsensus();
-
+   
     // Check transaction
     int chainHeight = chainActive.Height();
     bool fColdStakingActive = sporkManager.IsSporkActive(SPORK_17_COLDSTAKING_ENFORCEMENT);
-    if (!CheckTransaction(tx, chainHeight >= consensus.height_start_ZC, state, fColdStakingActive))
+    if (!CheckTransaction(tx, state, fColdStakingActive))
         return state.DoS(100, error("%s : CheckTransaction failed", __func__), REJECT_INVALID, "bad-tx");
 
     // Coinbase is only valid in a block, not as a loose transaction
@@ -1011,19 +997,14 @@ bool AcceptToMemoryPool(CTxMemPool& pool, CValidationState& state, const CTransa
         }
     }
 
-    bool hasZcSpendInputs = tx.HasZerocoinSpendInputs();
-
-    // Check for conflicts with in-memory transactions
-    if (!hasZcSpendInputs) {
-        LOCK(pool.cs); // protect pool.mapNextTx
-        for (const auto &in : tx.vin) {
-            COutPoint outpoint = in.prevout;
-            if (pool.mapNextTx.count(outpoint)) {
-                // Disable replacement feature for now
-                return false;
-            }
-        }
-    }
+	LOCK(pool.cs); // protect pool.mapNextTx
+	for (const auto &in : tx.vin) {
+		COutPoint outpoint = in.prevout;
+		if (pool.mapNextTx.count(outpoint)) {
+			// Disable replacement feature for now
+			return false;
+		}
+	}
 
 
     {
@@ -1031,76 +1012,39 @@ bool AcceptToMemoryPool(CTxMemPool& pool, CValidationState& state, const CTransa
         CCoinsViewCache view(&dummy);
 
         CAmount nValueIn = 0;
-        if (hasZcSpendInputs) {
-            nValueIn = tx.GetZerocoinSpent();
+		
+		LOCK(pool.cs);
+		CCoinsViewMemPool viewMemPool(pcoinsTip, pool);
+		view.SetBackend(viewMemPool);
 
-            //Check that txid is not already in the chain
-            int nHeightTx = 0;
-            if (IsTransactionInChain(tx.GetHash(), nHeightTx))
-                return state.Invalid(error("%s : zPIV spend tx %s already in block %d",
-                        __func__, tx.GetHash().GetHex(), nHeightTx), REJECT_DUPLICATE, "bad-txns-inputs-spent");
+		// do we already have it?
+		if (view.HaveCoins(hash))
+			return false;
 
-            //Check for double spending of serial #'s
-            for (const CTxIn& txIn : tx.vin) {
-                // Only allow for public zc spends inputs
-                if (!txIn.IsZerocoinPublicSpend())
-                    return state.Invalid(error("%s: failed for tx %s, every input must be a zcpublicspend",
-                            __func__, tx.GetHash().GetHex()), REJECT_INVALID, "bad-txns-invalid-zpiv");
+		// do all inputs exist?
+		// Note that this does not check for the presence of actual outputs (see the next check for that),
+		// only helps filling in pfMissingInputs (to determine missing vs spent).
+		for (const CTxIn& txin : tx.vin) {
+			if (!view.HaveCoins(txin.prevout.hash)) {
+				if (pfMissingInputs)
+					*pfMissingInputs = true;
+				return false;
+			}
+		}
 
-                libzerocoin::ZerocoinParams* params = consensus.Zerocoin_Params(false);
-                PublicCoinSpend publicSpend(params);
-                if (!ZPIVModule::ParseZerocoinPublicSpend(txIn, tx, state, publicSpend)){
-                    return false;
-                }
-                if (!ContextualCheckZerocoinSpend(tx, &publicSpend, chainHeight, UINT256_ZERO))
-                    return state.Invalid(error("%s: ContextualCheckZerocoinSpend failed for tx %s",
-                            __func__, tx.GetHash().GetHex()), REJECT_INVALID, "bad-txns-invalid-zpiv");
+		// are the actual inputs available?
+		if (!view.HaveInputs(tx))
+			return state.Invalid(error("%s : inputs already spent",
+					__func__), REJECT_DUPLICATE, "bad-txns-inputs-spent");
 
-                // Check that the version matches the one enforced with SPORK_18
-                if (!CheckPublicCoinSpendVersion(publicSpend.getVersion())) {
-                    return state.Invalid(error("%s : Public Zerocoin spend version %d not accepted. must be version %d.",
-                            __func__, publicSpend.getVersion(), CurrentPublicCoinSpendVersion()), REJECT_INVALID, "bad-txns-invalid-zpiv");
-                }
+		// Bring the best block into scope
+		view.GetBestBlock();
 
-            }
-        } else {
-            LOCK(pool.cs);
-            CCoinsViewMemPool viewMemPool(pcoinsTip, pool);
-            view.SetBackend(viewMemPool);
+		nValueIn = view.GetValueIn(tx);
 
-            // do we already have it?
-            if (view.HaveCoins(hash))
-                return false;
-
-            // do all inputs exist?
-            // Note that this does not check for the presence of actual outputs (see the next check for that),
-            // only helps filling in pfMissingInputs (to determine missing vs spent).
-            for (const CTxIn& txin : tx.vin) {
-                if (!view.HaveCoins(txin.prevout.hash)) {
-                    if (pfMissingInputs)
-                        *pfMissingInputs = true;
-                    return false;
-                }
-            }
-
-            // Reject legacy zPIV mints
-            if (!Params().IsRegTestNet() && tx.HasZerocoinMintOutputs())
-                return state.Invalid(error("%s : tried to include zPIV mint output in tx %s",
-                        __func__, tx.GetHash().GetHex()), REJECT_INVALID, "bad-txns-invalid-outputs");
-
-            // are the actual inputs available?
-            if (!view.HaveInputs(tx))
-                return state.Invalid(error("%s : inputs already spent",
-                        __func__), REJECT_DUPLICATE, "bad-txns-inputs-spent");
-
-            // Bring the best block into scope
-            view.GetBestBlock();
-
-            nValueIn = view.GetValueIn(tx);
-
-            // we have all inputs cached now, so switch back to dummy, so we don't need to keep lock on mempool
-            view.SetBackend(dummy);
-        }
+		// we have all inputs cached now, so switch back to dummy, so we don't need to keep lock on mempool
+		view.SetBackend(dummy);
+        
 
         // Check for non-standard pay-to-script-hash in inputs
         if (!Params().IsRegTestNet() && !AreInputsStandard(tx, view))
@@ -1111,20 +1055,19 @@ bool AcceptToMemoryPool(CTxMemPool& pool, CValidationState& state, const CTransa
         // itself can contain sigops MAX_TX_SIGOPS is less than
         // MAX_BLOCK_SIGOPS; we still consider this an invalid rather than
         // merely non-standard transaction.
-        if (!hasZcSpendInputs) {
-            unsigned int nSigOps = GetLegacySigOpCount(tx);
-            unsigned int nMaxSigOps = MAX_TX_SIGOPS_CURRENT;
-            nSigOps += GetP2SHSigOpCount(tx, view);
-            if(nSigOps > nMaxSigOps)
-                return state.DoS(0, error("%s : too many sigops %s, %d > %d",
-                        __func__, hash.ToString(), nSigOps, nMaxSigOps), REJECT_NONSTANDARD, "bad-txns-too-many-sigops");
-        }
+		unsigned int nSigOps = GetLegacySigOpCount(tx);
+		unsigned int nMaxSigOps = MAX_TX_SIGOPS_CURRENT;
+		nSigOps += GetP2SHSigOpCount(tx, view);
+		if(nSigOps > nMaxSigOps)
+			return state.DoS(0, error("%s : too many sigops %s, %d > %d",
+					__func__, hash.ToString(), nSigOps, nMaxSigOps), REJECT_NONSTANDARD, "bad-txns-too-many-sigops");
+        
 
         CAmount nValueOut = tx.GetValueOut();
         CAmount nFees = nValueIn - nValueOut;
         double dPriority = 0;
-        if (!hasZcSpendInputs)
-            view.GetPriority(tx, chainHeight);
+        
+		view.GetPriority(tx, chainHeight);
 
         CTxMemPoolEntry entry(tx, nFees, GetTime(), dPriority, chainHeight);
         unsigned int nSize = entry.GetTxSize();
@@ -1132,19 +1075,19 @@ bool AcceptToMemoryPool(CTxMemPool& pool, CValidationState& state, const CTransa
         // Don't accept it if it can't get into a block
         if (!ignoreFees) {
             CAmount txMinFee = GetMinRelayFee(tx, nSize, true);
-            if (fLimitFree && nFees < txMinFee && !hasZcSpendInputs)
+            if (fLimitFree && nFees < txMinFee)
                 return state.DoS(0, error("%s : not enough fees %s, %d < %d",
                         __func__, hash.ToString(), nFees, txMinFee), REJECT_INSUFFICIENTFEE, "insufficient fee");
 
             // Require that free transactions have sufficient priority to be mined in the next block.
-            if (!hasZcSpendInputs && GetBoolArg("-relaypriority", true) && nFees < ::minRelayTxFee.GetFee(nSize) && !AllowFree(view.GetPriority(tx, chainHeight + 1))) {
+            if (GetBoolArg("-relaypriority", true) && nFees < ::minRelayTxFee.GetFee(nSize) && !AllowFree(view.GetPriority(tx, chainHeight + 1))) {
                 return state.DoS(0, false, REJECT_INSUFFICIENTFEE, "insufficient priority");
             }
 
             // Continuously rate-limit free (really, very-low-fee) transactions
             // This mitigates 'penny-flooding' -- sending thousands of free transactions just to
             // be annoying or make others' transactions take longer to confirm.
-            if (fLimitFree && nFees < ::minRelayTxFee.GetFee(nSize) && !hasZcSpendInputs) {
+            if (fLimitFree && nFees < ::minRelayTxFee.GetFee(nSize)) {
                 static RecursiveMutex csFreeLimiter;
                 static double dFreeCount;
                 static int64_t nLastTime;
@@ -1172,11 +1115,13 @@ bool AcceptToMemoryPool(CTxMemPool& pool, CValidationState& state, const CTransa
         // As zero fee transactions are not going to be accepted in the near future (4.0) and the code will be fully refactored soon.
         // This is just a quick inline towards that goal, the mempool by default will not accept them. Blocking
         // any subsequent network relay.
-        if (!Params().IsRegTestNet() && nFees == 0 && !hasZcSpendInputs) {
+        if (!Params().IsRegTestNet() && nFees == 0) {
             return error("%s : zero fees not accepted %s, %d > %d",
                     __func__, hash.ToString(), nFees, ::minRelayTxFee.GetFee(nSize) * 10000);
         }
 
+		const Consensus::Params& consensus = Params().GetConsensus();
+		
         bool fCLTVIsActivated = (chainHeight >= consensus.height_start_BIP65);
 
         // Check against previous transactions
@@ -1222,7 +1167,7 @@ bool AcceptableInputs(CTxMemPool& pool, CValidationState& state, const CTransact
 
     const int chainHeight = chainActive.Height();
 
-    if (!CheckTransaction(tx, chainHeight >= Params().GetConsensus().height_start_ZC, state))
+    if (!CheckTransaction(tx, state))
         return error("AcceptableInputs: : CheckTransaction failed");
 
     // Coinbase is only valid in a block, not as a loose transaction
@@ -1247,17 +1192,15 @@ bool AcceptableInputs(CTxMemPool& pool, CValidationState& state, const CTransact
         }
     }
 
-    // Check for conflicts with in-memory transactions
-    if (!tx.HasZerocoinSpendInputs()) {
-        LOCK(pool.cs); // protect pool.mapNextTx
-        for (const auto &in : tx.vin) {
-            COutPoint outpoint = in.prevout;
-            if (pool.mapNextTx.count(outpoint)) {
-                // Disable replacement feature for now
-                return false;
-            }
-        }
-    }
+
+	LOCK(pool.cs); // protect pool.mapNextTx
+	for (const auto &in : tx.vin) {
+		COutPoint outpoint = in.prevout;
+		if (pool.mapNextTx.count(outpoint)) {
+			// Disable replacement feature for now
+			return false;
+		}
+	}
 
 
     {
@@ -1326,7 +1269,7 @@ bool AcceptableInputs(CTxMemPool& pool, CValidationState& state, const CTransact
             mempool.PrioritiseTransaction(hash, hash.ToString(), 1000, 0.1 * COIN);
         } else { // same as !ignoreFees for AcceptToMemoryPool
             CAmount txMinFee = GetMinRelayFee(tx, nSize, true);
-            if (fLimitFree && nFees < txMinFee && !tx.HasZerocoinSpendInputs())
+            if (fLimitFree && nFees < txMinFee)
                 return state.DoS(0, error("AcceptableInputs : not enough fees %s, %d < %d", hash.ToString(), nFees, txMinFee),
                     REJECT_INSUFFICIENTFEE, "insufficient fee");
 
@@ -1338,7 +1281,7 @@ bool AcceptableInputs(CTxMemPool& pool, CValidationState& state, const CTransact
             // Continuously rate-limit free (really, very-low-fee) transactions
             // This mitigates 'penny-flooding' -- sending thousands of free transactions just to
             // be annoying or make others' transactions take longer to confirm.
-            if (fLimitFree && nFees < ::minRelayTxFee.GetFee(nSize) && !tx.HasZerocoinSpendInputs()) {
+            if (fLimitFree && nFees < ::minRelayTxFee.GetFee(nSize)) {
                 static RecursiveMutex csFreeLimiter;
                 static double dFreeCount;
                 static int64_t nLastTime;
@@ -1602,8 +1545,6 @@ int64_t GetBlockValue(int nHeight)
         nSubsidy = 13.5 * COIN;
     } else if (nHeight <= 647999 && nHeight >= 604800) {
         nSubsidy = 9 * COIN;
-    } else if (nHeight < Params().GetConsensus().height_start_ZC_SerialsV2) {
-        nSubsidy = 4.5 * COIN;
     } else {
         nSubsidy = 5 * COIN;
     }
@@ -1783,7 +1724,7 @@ void static InvalidBlockFound(CBlockIndex* pindex, const CValidationState& state
 void UpdateCoins(const CTransaction& tx, CValidationState& state, CCoinsViewCache& inputs, CTxUndo& txundo, int nHeight)
 {
     // mark inputs spent
-    if (!tx.IsCoinBase() && !tx.HasZerocoinSpendInputs()) {
+    if (!tx.IsCoinBase()) {
         txundo.vprevout.reserve(tx.vin.size());
         for (const CTxIn& txin : tx.vin) {
             txundo.vprevout.push_back(CTxInUndo());
@@ -1807,7 +1748,7 @@ bool CScriptCheck::operator()()
 
 bool CheckInputs(const CTransaction& tx, CValidationState& state, const CCoinsViewCache& inputs, bool fScriptChecks, unsigned int flags, bool cacheStore, std::vector<CScriptCheck>* pvChecks)
 {
-    if (!tx.IsCoinBase() && !tx.HasZerocoinSpendInputs()) {
+    if (!tx.IsCoinBase()) {
         if (pvChecks)
             pvChecks->reserve(tx.vin.size());
 
@@ -1924,32 +1865,6 @@ static bool AbortNode(CValidationState& state, const std::string& strMessage, co
     return state.Error(strMessage);
 }
 
-// Legacy Zerocoin DB: used for performance during IBD
-// (between Zerocoin_Block_V2_Start and Zerocoin_Block_Last_Checkpoint)
-void DataBaseAccChecksum(CBlockIndex* pindex, bool fWrite)
-{
-    const Consensus::Params& consensus = Params().GetConsensus();
-    if (!pindex ||
-            pindex->nHeight < consensus.height_start_ZC_SerialsV2 ||
-            pindex->nHeight > consensus.height_last_ZC_AccumCheckpoint ||
-            pindex->nAccumulatorCheckpoint == pindex->pprev->nAccumulatorCheckpoint)
-        return;
-
-    uint256 accCurr = pindex->nAccumulatorCheckpoint;
-    uint256 accPrev = pindex->pprev->nAccumulatorCheckpoint;
-    // add/remove changed checksums to/from DB
-    for (int i = (int)libzerocoin::zerocoinDenomList.size()-1; i >= 0; i--) {
-        const uint32_t& nChecksum = accCurr.Get32();
-        if (nChecksum != accPrev.Get32()) {
-            fWrite ?
-               zerocoinDB->WriteAccChecksum(nChecksum, libzerocoin::zerocoinDenomList[i], pindex->nHeight) :
-               zerocoinDB->EraseAccChecksum(nChecksum, libzerocoin::zerocoinDenomList[i]);
-        }
-        accCurr >>= 32;
-        accPrev >>= 32;
-    }
-}
-
 bool DisconnectBlock(CBlock& block, CValidationState& state, CBlockIndex* pindex, CCoinsViewCache& view, bool* pfClean)
 {
     AssertLockHeld(cs_main);
@@ -1975,70 +1890,10 @@ bool DisconnectBlock(CBlock& block, CValidationState& state, CBlockIndex* pindex
     if (blockUndo.vtxundo.size() + 1 != block.vtx.size())
         return error("DisconnectBlock() : block and undo data inconsistent");
 
-    //Track zPIV money supply
-    if (!UpdateZPIVSupplyDisconnect(block, pindex))
-        return error("%s: Failed to calculate new zPIV supply", __func__);
-
     // undo transactions in reverse order
     for (int i = block.vtx.size() - 1; i >= 0; i--) {
         const CTransaction& tx = block.vtx[i];
 
-        /** UNDO ZEROCOIN DATABASING
-         * note we only undo zerocoin databasing in the following statement, value to and from PIVX
-         * addresses should still be handled by the typical bitcoin based undo code
-         * */
-        if (tx.ContainsZerocoins()) {
-            libzerocoin::ZerocoinParams *params = Params().GetConsensus().Zerocoin_Params(false);
-            if (tx.HasZerocoinSpendInputs()) {
-                //erase all zerocoinspends in this transaction
-                for (const CTxIn &txin : tx.vin) {
-                    bool isPublicSpend = txin.IsZerocoinPublicSpend();
-                    if (txin.scriptSig.IsZerocoinSpend() || isPublicSpend) {
-                        CBigNum serial;
-                        if (isPublicSpend) {
-                            PublicCoinSpend publicSpend(params);
-                            CValidationState state;
-                            if (!ZPIVModule::ParseZerocoinPublicSpend(txin, tx, state, publicSpend)) {
-                                return error("Failed to parse public spend");
-                            }
-                            serial = publicSpend.getCoinSerialNumber();
-                            nValueIn += publicSpend.getDenomination() * COIN;
-                        } else {
-                            libzerocoin::CoinSpend spend = TxInToZerocoinSpend(txin);
-                            serial = spend.getCoinSerialNumber();
-                            nValueIn += spend.getDenomination() * COIN;
-                        }
-
-                        if (!zerocoinDB->EraseCoinSpend(serial))
-                            return error("failed to erase spent zerocoin in block");
-
-                        //if this was our spend, then mark it unspent now
-                        if (pwalletMain) {
-                            if (pwalletMain->IsMyZerocoinSpend(serial)) {
-                                if (!pwalletMain->SetMintUnspent(serial))
-                                    LogPrintf("%s: failed to automatically reset mint", __func__);
-                            }
-                        }
-                    }
-
-                }
-            }
-
-            if (tx.HasZerocoinMintOutputs()) {
-                //erase all zerocoinmints in this transaction
-                for (const CTxOut &txout : tx.vout) {
-                    if (txout.scriptPubKey.empty() || !txout.IsZerocoinMint())
-                        continue;
-
-                    libzerocoin::PublicCoin pubCoin(params);
-                    if (!TxOutToPublicCoin(txout, pubCoin, state))
-                        return error("DisconnectBlock(): TxOutToPublicCoin() failed");
-
-                    if (!zerocoinDB->EraseCoinMint(pubCoin.getValue()))
-                        return error("DisconnectBlock(): Failed to erase coin mint");
-                }
-            }
-        }
         nValueOut += tx.GetValueOut();
 
         uint256 hash = tx.GetHash();
@@ -2067,7 +1922,7 @@ bool DisconnectBlock(CBlock& block, CValidationState& state, CBlockIndex* pindex
         }
 
         // restore inputs
-        if (!tx.IsCoinBase() && !tx.HasZerocoinSpendInputs()) { // not coinbases or zerocoinspend because they dont have traditional inputs
+        if (!tx.IsCoinBase()) { // not coinbases or zerocoinspend because they dont have traditional inputs
             const CTxUndo& txundo = blockUndo.vtxundo[i - 1];
             if (txundo.vprevout.size() != tx.vin.size())
                 return error("DisconnectBlock() : transaction and undo data inconsistent - txundo.vprevout.siz=%d tx.vin.siz=%d", txundo.vprevout.size(), tx.vin.size());
@@ -2095,7 +1950,7 @@ bool DisconnectBlock(CBlock& block, CValidationState& state, CBlockIndex* pindex
             }
         }
 
-        if (!tx.HasZerocoinSpendInputs() && !tx.IsCoinBase() && view.HaveInputs(tx))
+        if (!tx.IsCoinBase() && view.HaveInputs(tx))
             nValueIn += view.GetValueIn(tx);
     }
 
@@ -2104,13 +1959,6 @@ bool DisconnectBlock(CBlock& block, CValidationState& state, CBlockIndex* pindex
 
     // move best block pointer to prevout block
     view.SetBestBlock(pindex->pprev->GetBlockHash());
-
-    const Consensus::Params& consensus = Params().GetConsensus();
-    if (pindex->nHeight >= consensus.height_start_ZC_SerialsV2 &&
-            pindex->nHeight <= consensus.height_last_ZC_AccumCheckpoint) {
-        // Legacy Zerocoin DB: If Accumulators Checkpoint is changed, remove changed checksums
-        DataBaseAccChecksum(pindex, false);
-    }
 
     if (pfClean) {
         *pfClean = fClean;
@@ -2207,16 +2055,13 @@ bool ConnectBlock(const CBlock& block, CValidationState& state, CBlockIndex* pin
     unsigned int nSigOps = 0;
     CDiskTxPos pos(pindex->GetBlockPos(), GetSizeOfCompactSize(block.vtx.size()));
     std::vector<std::pair<uint256, CDiskTxPos> > vPos;
-    std::vector<std::pair<libzerocoin::CoinSpend, uint256> > vSpends;
-    std::vector<std::pair<libzerocoin::PublicCoin, uint256> > vMints;
     vPos.reserve(block.vtx.size());
     CBlockUndo blockundo;
     blockundo.vtxundo.reserve(block.vtx.size() - 1);
     CAmount nValueOut = 0;
     CAmount nValueIn = 0;
     unsigned int nMaxBlockSigOps = MAX_BLOCK_SIGOPS_CURRENT;
-    std::vector<uint256> vSpendsInBlock;
-    uint256 hashBlock = block.GetHash();
+    std::vector<uint256> vSpendsInBlock;    
     for (unsigned int i = 0; i < block.vtx.size(); i++) {
         const CTransaction& tx = block.vtx[i];
 
@@ -2239,71 +2084,7 @@ bool ConnectBlock(const CBlock& block, CValidationState& state, CBlockIndex* pin
         if (nSigOps > nMaxBlockSigOps)
             return state.DoS(100, error("ConnectBlock() : too many sigops"), REJECT_INVALID, "bad-blk-sigops");
 
-        //Temporarily disable zerocoin transactions for maintenance
-        if (block.nTime > sporkManager.GetSporkValue(SPORK_16_ZEROCOIN_MAINTENANCE_MODE) && !IsInitialBlockDownload() && tx.ContainsZerocoins()) {
-            return state.DoS(100, error("ConnectBlock() : zerocoin transactions are currently in maintenance mode"));
-        }
-
-        if (tx.HasZerocoinMintOutputs()) {
-            if (pindex->nHeight >= consensus.height_start_ZC_PublicSpends)
-                return state.DoS(100, error("%s: Mints no longer accepted at height %d", __func__, pindex->nHeight));
-            // parse minted coins
-            for (auto& out : tx.vout) {
-                if (!out.IsZerocoinMint()) continue;
-                libzerocoin::PublicCoin coin(consensus.Zerocoin_Params(false));
-                if (!TxOutToPublicCoin(out, coin, state))
-                    return state.DoS(100, error("%s: failed final check of zerocoinmint for tx %s", __func__, tx.GetHash().GetHex()));
-                vMints.emplace_back(std::make_pair(coin, tx.GetHash()));
-            }
-        }
-
-        if (tx.HasZerocoinSpendInputs()) {
-            int nHeightTx = 0;
-            uint256 txid = tx.GetHash();
-            vSpendsInBlock.emplace_back(txid);
-            if (IsTransactionInChain(txid, nHeightTx)) {
-                //when verifying blocks on init, the blocks are scanned without being disconnected - prevent that from causing an error
-                if (!fVerifyingBlocks || (fVerifyingBlocks && pindex->nHeight > nHeightTx))
-                    return state.DoS(100, error("%s : txid %s already exists in block %d , trying to include it again in block %d", __func__,
-                                                tx.GetHash().GetHex(), nHeightTx, pindex->nHeight),
-                                     REJECT_INVALID, "bad-txns-inputs-missingorspent");
-            }
-
-            //Check for double spending of serial #'s
-            std::set<CBigNum> setSerials;
-            for (const CTxIn& txIn : tx.vin) {
-                bool isPublicSpend = txIn.IsZerocoinPublicSpend();
-                bool isPrivZerocoinSpend = txIn.IsZerocoinSpend();
-                if (!isPrivZerocoinSpend && !isPublicSpend)
-                    continue;
-
-                // Check enforcement
-                if (!CheckPublicCoinSpendEnforced(pindex->nHeight, isPublicSpend)){
-                    return false;
-                }
-
-                if (isPublicSpend) {
-                    libzerocoin::ZerocoinParams* params = consensus.Zerocoin_Params(false);
-                    PublicCoinSpend publicSpend(params);
-                    if (!ZPIVModule::ParseZerocoinPublicSpend(txIn, tx, state, publicSpend)){
-                        return false;
-                    }
-                    nValueIn += publicSpend.getDenomination() * COIN;
-                    //queue for db write after the 'justcheck' section has concluded
-                    vSpends.emplace_back(std::make_pair(publicSpend, tx.GetHash()));
-                    if (!ContextualCheckZerocoinSpend(tx, &publicSpend, pindex->nHeight, hashBlock))
-                        return state.DoS(100, error("%s: failed to add block %s with invalid public zc spend", __func__, tx.GetHash().GetHex()), REJECT_INVALID);
-                } else {
-                    libzerocoin::CoinSpend spend = TxInToZerocoinSpend(txIn);
-                    nValueIn += spend.getDenomination() * COIN;
-                    //queue for db write after the 'justcheck' section has concluded
-                    vSpends.emplace_back(std::make_pair(spend, tx.GetHash()));
-                    if (!ContextualCheckZerocoinSpend(tx, &spend, pindex->nHeight, hashBlock))
-                        return state.DoS(100, error("%s: failed to add block %s with invalid zerocoinspend", __func__, tx.GetHash().GetHex()), REJECT_INVALID);
-                }
-            }
-
-        } else if (!tx.IsCoinBase()) {
+        if (!tx.IsCoinBase()) {
             if (!view.HaveInputs(tx))
                 return state.DoS(100, error("ConnectBlock() : inputs missing/spent"),
                     REJECT_INVALID, "bad-txns-inputs-missingorspent");
@@ -2387,54 +2168,12 @@ bool ConnectBlock(const CBlock& block, CValidationState& state, CBlockIndex* pin
         setDirtyBlockIndex.insert(pindex);
     }
 
-    //Record zPIV serials
-    if (pwalletMain) {
-        std::set<uint256> setAddedTx;
-        for (const std::pair<libzerocoin::CoinSpend, uint256>& pSpend : vSpends) {
-            // Send signal to wallet if this is ours
-            if (pwalletMain->IsMyZerocoinSpend(pSpend.first.getCoinSerialNumber())) {
-                LogPrintf("%s: %s detected zerocoinspend in transaction %s \n", __func__,
-                          pSpend.first.getCoinSerialNumber().GetHex(), pSpend.second.GetHex());
-                pwalletMain->NotifyZerocoinChanged(pwalletMain, pSpend.first.getCoinSerialNumber().GetHex(), "Used",
-                                                   CT_UPDATED);
-
-                //Don't add the same tx multiple times
-                if (setAddedTx.count(pSpend.second))
-                    continue;
-
-                //Search block for matching tx, turn into wtx, set merkle branch, add to wallet
-                for (const CTransaction& tx : block.vtx) {
-                    if (tx.GetHash() == pSpend.second) {
-                        CWalletTx wtx(pwalletMain, tx);
-                        wtx.nTimeReceived = pindex->GetBlockTime();
-                        wtx.SetMerkleBranch(block);
-                        pwalletMain->AddToWallet(wtx, false, nullptr);
-                        setAddedTx.insert(pSpend.second);
-                    }
-                }
-            }
-        }
-    }
-
-    // Flush spend/mint info to disk
-    if (!vSpends.empty() && !zerocoinDB->WriteCoinSpendBatch(vSpends))
-        return AbortNode(state, "Failed to record coin serials to database");
-
-    if (!vMints.empty() && !zerocoinDB->WriteCoinMintBatch(vMints))
-        return AbortNode(state, "Failed to record new mints to database");
-
     if (fTxIndex)
         if (!pblocktree->WriteTxIndex(vPos))
             return AbortNode(state, "Failed to write transaction index");
 
     // add this block to the view's block chain
     view.SetBestBlock(pindex->GetBlockHash());
-
-    // Update zPIV money supply map
-    if (!UpdateZPIVSupplyConnect(block, pindex, fJustCheck)) {
-        return state.DoS(100, error("%s: Failed to calculate new zPIV supply for block=%s height=%d", __func__,
-                                    block.GetHash().GetHex(), pindex->nHeight), REJECT_INVALID);
-    }
 
     // Update PIV money supply
     nMoneySupply += (nValueOut - nValueIn);
@@ -2451,15 +2190,6 @@ bool ConnectBlock(const CBlock& block, CValidationState& state, CBlockIndex* pin
     int64_t nTime4 = GetTimeMicros();
     nTimeCallbacks += nTime4 - nTime3;
     LogPrint(BCLog::BENCH, "    - Callbacks: %.2fms [%.2fs]\n", 0.001 * (nTime4 - nTime3), nTimeCallbacks * 0.000001);
-
-
-    if (pindex->nHeight >= consensus.height_start_ZC_SerialsV2 && pindex->nHeight < consensus.height_last_ZC_AccumCheckpoint) {
-        // Legacy Zerocoin DB: If Accumulators Checkpoint is changed, database the checksums
-        DataBaseAccChecksum(pindex, true);
-    } else if (pindex->nHeight == consensus.height_last_ZC_AccumCheckpoint) {
-        // After last Checkpoint block, wipe the checksum database
-        zerocoinDB->WipeAccChecksums();
-    }
 
     return true;
 }
@@ -2508,10 +2238,6 @@ bool static FlushStateToDisk(CValidationState& state, FlushStateMode mode)
                 }
                 if (!pblocktree->WriteBatchSync(vFiles, nLastBlockFile, vBlocks)) {
                     return AbortNode(state, "Files to write to block index database");
-                }
-                // Flush zerocoin supply
-                if (!mapZerocoinSupply.empty() && !zerocoinDB->WriteZCSupply(mapZerocoinSupply)) {
-                    return AbortNode(state, "Failed to write zerocoin supply to DB");
                 }
                 // Flush money supply
                 if (!pblocktree->WriteMoneySupply(nMoneySupply)) {
@@ -3302,17 +3028,6 @@ bool CheckBlockHeader(const CBlockHeader& block, CValidationState& state, bool f
 
     if (Params().IsRegTestNet()) return true;
 
-    // Version 4 header must be used after consensus.ZC_TimeStart. And never before.
-    if (block.GetBlockTime() > Params().GetConsensus().ZC_TimeStart) {
-        if(block.nVersion < 4)
-            return state.DoS(50, error("CheckBlockHeader() : block version must be above 4 after ZerocoinStartHeight"),
-            REJECT_INVALID, "block-version");
-    } else {
-        if (block.nVersion >= 4)
-            return state.DoS(50, error("CheckBlockHeader() : block version must be below 4 before ZerocoinStartHeight"),
-            REJECT_INVALID, "block-version");
-    }
-
     return true;
 }
 
@@ -3448,9 +3163,6 @@ bool CheckBlock(const CBlock& block, CValidationState& state, bool fCheckPOW, bo
     // Cold Staking enforcement (true during sync - reject P2CS outputs when false)
     bool fColdStakingActive = true;
 
-    // Zerocoin activation
-    bool fZerocoinActive = block.GetBlockTime() > Params().GetConsensus().ZC_TimeStart;
-
     // masternode payments / budgets
     CBlockIndex* pindexPrev = chainActive.Tip();
     int nHeight = 0;
@@ -3492,52 +3204,21 @@ bool CheckBlock(const CBlock& block, CValidationState& state, bool fCheckPOW, bo
     }
 
     // Check transactions
-    std::vector<CBigNum> vBlockSerials;
     for (const CTransaction& tx : block.vtx) {
         if (!CheckTransaction(
                 tx,
-                fZerocoinActive,
                 state,
                 fColdStakingActive
         ))
             return error("%s : CheckTransaction failed", __func__);
-
-        // double check that there are no double spent zPIV spends in this block
-        if (tx.HasZerocoinSpendInputs()) {
-            for (const CTxIn& txIn : tx.vin) {
-                bool isPublicSpend = txIn.IsZerocoinPublicSpend();
-                if (txIn.IsZerocoinSpend() || isPublicSpend) {
-                    libzerocoin::CoinSpend spend;
-                    if (isPublicSpend) {
-                        libzerocoin::ZerocoinParams* params = Params().GetConsensus().Zerocoin_Params(false);
-                        PublicCoinSpend publicSpend(params);
-                        if (!ZPIVModule::ParseZerocoinPublicSpend(txIn, tx, state, publicSpend)){
-                            return false;
-                        }
-                        spend = publicSpend;
-                        // check that the version matches the one enforced with SPORK_18 (don't ban if it fails)
-                        if (!IsInitialBlockDownload() && !CheckPublicCoinSpendVersion(spend.getVersion())) {
-                            return state.DoS(0, error("%s : Public Zerocoin spend version %d not accepted. must be version %d.",
-                                    __func__, spend.getVersion(), CurrentPublicCoinSpendVersion()), REJECT_INVALID, "bad-zcspend-version");
-                        }
-                    } else {
-                        spend = TxInToZerocoinSpend(txIn);
-                    }
-                    if (std::count(vBlockSerials.begin(), vBlockSerials.end(), spend.getCoinSerialNumber()))
-                        return state.DoS(100, error("%s : Double spending of zPIV serial %s in block\n Block: %s",
-                                                    __func__, spend.getCoinSerialNumber().GetHex(), block.ToString()));
-                    vBlockSerials.emplace_back(spend.getCoinSerialNumber());
-                }
-            }
-        }
     }
 
     unsigned int nSigOps = 0;
     for (const CTransaction& tx : block.vtx) {
         nSigOps += GetLegacySigOpCount(tx);
     }
-    unsigned int nMaxBlockSigOps = fZerocoinActive ? MAX_BLOCK_SIGOPS_CURRENT : MAX_BLOCK_SIGOPS_LEGACY;
-    if (nSigOps > nMaxBlockSigOps)
+
+    if (nSigOps > MAX_BLOCK_SIGOPS_LEGACY)
         return state.DoS(100, error("%s : out-of-bounds SigOpCount", __func__),
             REJECT_INVALID, "bad-blk-sigops", true);
 
@@ -3630,7 +3311,6 @@ bool ContextualCheckBlockHeader(const CBlockHeader& block, CValidationState& sta
 
     // Reject outdated version blocks
     if((block.nVersion < 3 && nHeight >= 1) ||
-        (block.nVersion < 4 && nHeight >= consensus.height_start_ZC) ||
         (block.nVersion < 5 && nHeight >= consensus.height_start_BIP65) ||
         (block.nVersion < 6 && nHeight >= consensus.height_start_StakeModifierV2) ||
         (block.nVersion < 7 && nHeight >= consensus.height_start_TimeProtoV2))
@@ -3810,7 +3490,6 @@ bool AcceptBlock(CBlock& block, CValidationState& state, CBlockIndex** ppindex, 
     }
 
     int nHeight = pindex->nHeight;
-    int splitHeight = -1;
 
     if (isPoS) {
         LOCK(cs_main);
@@ -3824,53 +3503,15 @@ bool AcceptBlock(CBlock& block, CValidationState& state, CBlockIndex** ppindex, 
 
         // Inputs
         std::vector<CTxIn> pivInputs;
-        std::vector<CTxIn> zPIVInputs;
 
         for (const CTxIn& stakeIn : stakeTxIn.vin) {
-            if(stakeIn.IsZerocoinSpend()){
-                zPIVInputs.push_back(stakeIn);
-            }else{
-                pivInputs.push_back(stakeIn);
-            }
+			pivInputs.push_back(stakeIn);           
         }
+		
         const bool hasPIVInputs = !pivInputs.empty();
-        const bool hasZPIVInputs = !zPIVInputs.empty();
 
-        // ZC started after PoS.
-        // Check for serial double spent on the same block, TODO: Move this to the proper method..
-
-        std::vector<CBigNum> inBlockSerials;
         for (const CTransaction& tx : block.vtx) {
             for (const CTxIn& in: tx.vin) {
-                if(nHeight >= Params().GetConsensus().height_start_ZC) {
-                    bool isPublicSpend = in.IsZerocoinPublicSpend();
-                    bool isPrivZerocoinSpend = in.IsZerocoinSpend();
-                    if (isPrivZerocoinSpend || isPublicSpend) {
-
-                        // Check enforcement
-                        if (!CheckPublicCoinSpendEnforced(pindex->nHeight, isPublicSpend)){
-                            return false;
-                        }
-
-                        libzerocoin::CoinSpend spend;
-                        if (isPublicSpend) {
-                            libzerocoin::ZerocoinParams* params = Params().GetConsensus().Zerocoin_Params(false);
-                            PublicCoinSpend publicSpend(params);
-                            if (!ZPIVModule::ParseZerocoinPublicSpend(in, tx, state, publicSpend)){
-                                return false;
-                            }
-                            spend = publicSpend;
-                        } else {
-                            spend = TxInToZerocoinSpend(in);
-                        }
-                        // Check for serials double spending in the same block
-                        if (std::find(inBlockSerials.begin(), inBlockSerials.end(), spend.getCoinSerialNumber()) !=
-                            inBlockSerials.end()) {
-                            return state.DoS(100, error("%s: serial double spent on the same block", __func__));
-                        }
-                        inBlockSerials.push_back(spend.getCoinSerialNumber());
-                    }
-                }
                 if(tx.IsCoinStake()) continue;
                 if(hasPIVInputs) {
                     // Check if coinstake input is double spent inside the same block
@@ -3879,11 +3520,8 @@ bool AcceptBlock(CBlock& block, CValidationState& state, CBlockIndex** ppindex, 
                             // double spent coinstake input inside block
                             return error("%s: double spent coinstake input inside block", __func__);
                 }
-
             }
         }
-        inBlockSerials.clear();
-
 
         // Check whether is a fork or not
         if (isBlockFromFork) {
@@ -3895,7 +3533,6 @@ bool AcceptBlock(CBlock& block, CValidationState& state, CBlockIndex** ppindex, 
             if (!ReadBlockFromDisk(bl, prev))
                 return error("%s: previous block %s not on disk", __func__, prev->GetBlockHash().GetHex());
 
-            std::vector<CBigNum> vBlockSerials;
             int readBlock = 0;
             // Go backwards on the forked chain up to the split
             while (!chainActive.Contains(prev)) {
@@ -3912,11 +3549,6 @@ bool AcceptBlock(CBlock& block, CValidationState& state, CBlockIndex** ppindex, 
                 for (const CTransaction& t : bl.vtx) {
                     // Loop through every input of this tx
                     for (const CTxIn& in: t.vin) {
-                        // If this input is a zerocoin spend, and the coinstake has zerocoin inputs
-                        // then store the serials for later check
-                        if(hasZPIVInputs && in.IsZerocoinSpend())
-                            vBlockSerials.push_back(TxInToZerocoinSpend(in).getCoinSerialNumber());
-
                         // Loop through every input of the staking tx
                         if (hasPIVInputs) {
                             for (const CTxIn& stakeIn : pivInputs)
@@ -3934,69 +3566,24 @@ bool AcceptBlock(CBlock& block, CValidationState& state, CBlockIndex** ppindex, 
                     return error("%s: previous block %s not on disk", __func__, prev->GetBlockHash().GetHex());
 
             }
-
-            // Split height
-            splitHeight = prev->nHeight;
-
-            // Now that this loop if completed. Check if we have zPIV inputs.
-            if(hasZPIVInputs) {
-                for (const CTxIn& zPivInput : zPIVInputs) {
-                    libzerocoin::CoinSpend spend = TxInToZerocoinSpend(zPivInput);
-
-                    // First check if the serials were not already spent on the forked blocks.
-                    CBigNum coinSerial = spend.getCoinSerialNumber();
-                    for(const CBigNum& serial : vBlockSerials){
-                        if(serial == coinSerial){
-                            return state.DoS(100, error("%s: serial double spent on fork", __func__));
-                        }
-                    }
-
-                    // Now check if the serial exists before the chain split.
-                    int nHeightTx = 0;
-                    if (IsSerialInBlockchain(spend.getCoinSerialNumber(), nHeightTx)) {
-                        // if the height is nHeightTx > chainSplit means that the spent occurred after the chain split
-                        if(nHeightTx <= splitHeight)
-                            return state.DoS(100, error("%s: serial double spent on main chain", __func__));
-                    }
-
-                    if (!ContextualCheckZerocoinSpendNoSerialCheck(stakeTxIn, &spend, pindex->nHeight, UINT256_ZERO))
-                        return state.DoS(100,error("%s: forked chain ContextualCheckZerocoinSpend failed for tx %s", __func__,
-                                                   stakeTxIn.GetHash().GetHex()), REJECT_INVALID, "bad-txns-invalid-zpiv");
-
-                }
-            }
-
         }
 
 
-        // If the stake is not a zPoS then let's check if the inputs were spent on the main chain
         const CCoinsViewCache coins(pcoinsTip);
-        if(!stakeTxIn.HasZerocoinSpendInputs()) {
-            for (const CTxIn& in: stakeTxIn.vin) {
-                const CCoins* coin = coins.AccessCoins(in.prevout.hash);
+		for (const CTxIn& in: stakeTxIn.vin) {
+			const CCoins* coin = coins.AccessCoins(in.prevout.hash);
 
-                if(!coin && !isBlockFromFork){
-                    // No coins on the main chain
-                    return error("%s: coin stake inputs not available on main chain, received height %d vs current %d", __func__, nHeight, chainActive.Height());
-                }
-                if(coin && !coin->IsAvailable(in.prevout.n)){
-                    if(!isBlockFromFork){
-                        // Coins not available
-                        return error("%s: coin stake inputs already spent in main chain", __func__);
-                    }
-                }
-            }
-        } else {
-            if(!isBlockFromFork)
-                for (const CTxIn& zPivInput : zPIVInputs) {
-                        libzerocoin::CoinSpend spend = TxInToZerocoinSpend(zPivInput);
-                        if (!ContextualCheckZerocoinSpend(stakeTxIn, &spend, pindex->nHeight, UINT256_ZERO))
-                            return state.DoS(100,error("%s: main chain ContextualCheckZerocoinSpend failed for tx %s", __func__,
-                                    stakeTxIn.GetHash().GetHex()), REJECT_INVALID, "bad-txns-invalid-zpiv");
-                }
-
-        }
-
+			if(!coin && !isBlockFromFork){
+				// No coins on the main chain
+				return error("%s: coin stake inputs not available on main chain, received height %d vs current %d", __func__, nHeight, chainActive.Height());
+			}
+			if(coin && !coin->IsAvailable(in.prevout.n)){
+				if(!isBlockFromFork){
+					// Coins not available
+					return error("%s: coin stake inputs already spent in main chain", __func__);
+				}
+			}
+		}
     }
 
     // Write block to history file
@@ -5145,7 +4732,6 @@ bool static ProcessMessage(CNode* pfrom, std::string strCommand, CDataStream& vR
         // TODO: Move this to an instant broadcast of the sporks.
         bool fMissingSporks = !pSporkDB->SporkExists(SPORK_14_NEW_PROTOCOL_ENFORCEMENT) ||
                               !pSporkDB->SporkExists(SPORK_15_NEW_PROTOCOL_ENFORCEMENT_2) ||
-                              !pSporkDB->SporkExists(SPORK_16_ZEROCOIN_MAINTENANCE_MODE) ||
                               !pSporkDB->SporkExists(SPORK_17_COLDSTAKING_ENFORCEMENT) ||
                               !pSporkDB->SporkExists(SPORK_18_ZEROCOIN_PUBLICSPEND_V4);
 
@@ -5476,12 +5062,11 @@ bool static ProcessMessage(CNode* pfrom, std::string strCommand, CDataStream& vR
         LOCK(cs_main);
 
         bool fMissingInputs = false;
-        bool fMissingZerocoinInputs = false;
         CValidationState state;
 
         mapAlreadyAskedFor.erase(inv);
 
-        if (!tx.HasZerocoinSpendInputs() && AcceptToMemoryPool(mempool, state, tx, true, &fMissingInputs, false, ignoreFees)) {
+        if (AcceptToMemoryPool(mempool, state, tx, true, &fMissingInputs, false, ignoreFees)) {
             mempool.check(pcoinsTip);
             RelayTransaction(tx);
             vWorkQueue.push_back(inv.hash);
@@ -5535,15 +5120,6 @@ bool static ProcessMessage(CNode* pfrom, std::string strCommand, CDataStream& vR
             }
 
             for (uint256 hash : vEraseQueue) EraseOrphanTx(hash);
-
-        } else if (tx.HasZerocoinSpendInputs() && AcceptToMemoryPool(mempool, state, tx, true, &fMissingZerocoinInputs, false, ignoreFees)) {
-            //Presstab: ZCoin has a bunch of code commented out here. Is this something that should have more going on?
-            //Also there is nothing that handles fMissingZerocoinInputs. Does there need to be?
-            RelayTransaction(tx);
-            LogPrint(BCLog::MEMPOOL, "AcceptToMemoryPool: Zerocoinspend peer=%d %s : accepted %s (poolsz %u)\n",
-                     pfrom->id, pfrom->cleanSubVer,
-                     tx.GetHash().ToString(),
-                     mempool.mapTx.size());
         } else if (fMissingInputs) {
             AddOrphanTx(tx, pfrom->GetId());
 

@@ -7,7 +7,6 @@
 #define BITCOIN_CONSENSUS_PARAMS_H
 
 #include "amount.h"
-#include "libzerocoin/Params.h"
 #include "uint256.h"
 #include <map>
 #include <string>
@@ -51,10 +50,6 @@ struct Params {
     int height_start_StakeModifierNewSelection;
     int height_start_StakeModifierV2;               // Blocks v6 start
     int height_start_TimeProtoV2;                   // Blocks v7 start
-    int height_start_ZC;                            // Blocks v4 start
-    int height_start_ZC_PublicSpends;
-    int height_start_ZC_SerialRangeCheck;
-    int height_start_ZC_SerialsV2;
 
     int64_t TargetTimespan(const bool fV2 = true) const { return fV2 ? nTargetTimespanV2 : nTargetTimespan; }
     uint256 ProofOfStakeLimit(const bool fV2) const { return fV2 ? posLimitV2 : posLimitV1; }
@@ -86,29 +81,6 @@ struct Params {
             return (utxoFromBlockTime + nStakeMinAge <= contextTime);
         // with stake modifier V2+, we require the utxo to be nStakeMinDepth deep in the chain
         return (contextHeight - utxoFromBlockHeight >= nStakeMinDepth);
-    }
-
-
-    /*
-     * (Legacy) Zerocoin consensus params
-     */
-    std::string ZC_Modulus;  // parsed in Zerocoin_Params (either as hex or dec string)
-    int ZC_MaxPublicSpendsPerTx;
-    int ZC_MaxSpendsPerTx;
-    int ZC_MinMintConfirmations;
-    CAmount ZC_MinMintFee;
-    int ZC_MinStakeDepth;
-    int ZC_TimeStart;
-
-    libzerocoin::ZerocoinParams* Zerocoin_Params(bool useModulusV1) const
-    {
-        static CBigNum bnHexModulus = 0;
-        if (!bnHexModulus) bnHexModulus.SetHex(ZC_Modulus);
-        static libzerocoin::ZerocoinParams ZCParamsHex = libzerocoin::ZerocoinParams(bnHexModulus);
-        static CBigNum bnDecModulus = 0;
-        if (!bnDecModulus) bnDecModulus.SetDec(ZC_Modulus);
-        static libzerocoin::ZerocoinParams ZCParamsDec = libzerocoin::ZerocoinParams(bnDecModulus);
-        return (useModulusV1 ? &ZCParamsHex : &ZCParamsDec);
     }
 };
 } // namespace Consensus

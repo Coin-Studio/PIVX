@@ -71,13 +71,7 @@ NavMenuWidget::NavMenuWidget(PIVXGUI *mainWindow, QWidget *parent) :
 
 void NavMenuWidget::loadWalletModel() {
     if (walletModel) {
-        if (walletModel->getZerocoinBalance() > 0) {
-            ui->btnPrivacy->setText("PRIVACY\n");
-            ui->btnPrivacy->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
-            connect(ui->btnPrivacy, &QPushButton::clicked, this, &NavMenuWidget::onPrivacyClicked);
-        } else {
-            ui->btnPrivacy->setVisible(false);
-        }
+        ui->btnPrivacy->setVisible(false);
 
         if (walletModel->getOptionsModel())
             ui->btnColdStaking->setVisible(walletModel->getOptionsModel()->isColdStakingScreenEnabled());

@@ -30,8 +30,6 @@
 #include "masternode-payments.h"
 #include "blocksignature.h"
 #include "spork.h"
-#include "zpivchain.h"
-
 
 #include <boost/thread.hpp>
 #include <boost/tuple/tuple.hpp>
@@ -123,9 +121,6 @@ CBlockTemplate* CreateNewBlock(const CScript& scriptPubKeyIn, CWallet* pwallet, 
     if (!pindexPrev) return nullptr;
     const int nHeight = pindexPrev->nHeight + 1;
 
-    // Make sure to create the correct block version
-    const Consensus::Params& consensus = Params().GetConsensus();
-
     //!> Block v7: Removes accumulator checkpoints
     pblock->nVersion = CBlockHeader::CURRENT_VERSION;
     // -regtest only: allow overriding block.nVersion with
@@ -196,17 +191,11 @@ CBlockTemplate* CreateNewBlock(const CScript& scriptPubKeyIn, CWallet* pwallet, 
             if (tx.IsCoinBase() || tx.IsCoinStake() || !IsFinalTx(tx, nHeight)){
                 continue;
             }
-            if(sporkManager.IsSporkActive(SPORK_16_ZEROCOIN_MAINTENANCE_MODE) && tx.ContainsZerocoins()){
-                continue;
-            }
 
             COrphan* porphan = NULL;
             double dPriority = 0;
             CAmount nTotalIn = 0;
             bool fMissingInputs = false;
-            bool hasZerocoinSpends = tx.HasZerocoinSpendInputs();
-            if (hasZerocoinSpends)
-                nTotalIn = tx.GetZerocoinSpent();
 
             for (const CTxIn& txin : tx.vin) {
                 // Read prev transaction
@@ -242,7 +231,6 @@ CBlockTemplate* CreateNewBlock(const CScript& scriptPubKeyIn, CWallet* pwallet, 
 
                 int nConf = nHeight - coins->nHeight;
 
-                // zPIV spends can have very large priority, use non-overflowing safe functions
                 dPriority = double_safe_addition(dPriority, ((double)nValueIn * nConf));
 
             }
@@ -273,8 +261,6 @@ CBlockTemplate* CreateNewBlock(const CScript& scriptPubKeyIn, CWallet* pwallet, 
         TxPriorityCompare comparer(fSortedByFee);
         std::make_heap(vecPriority.begin(), vecPriority.end(), comparer);
 
-        std::vector<CBigNum> vBlockSerials;
-        std::vector<CBigNum> vTxSerials;
         while (!vecPriority.empty()) {
             // Take highest priority transaction off the priority queue:
             double dPriority = vecPriority.front().get<0>();
@@ -300,7 +286,7 @@ CBlockTemplate* CreateNewBlock(const CScript& scriptPubKeyIn, CWallet* pwallet, 
             double dPriorityDelta = 0;
             CAmount nFeeDelta = 0;
             mempool.ApplyDeltas(hash, dPriorityDelta, nFeeDelta);
-            if (!tx.HasZerocoinSpendInputs() && fSortedByFee && (dPriorityDelta <= 0) && (nFeeDelta <= 0) && (feeRate < ::minRelayTxFee) && (nBlockSize + nTxSize >= nBlockMinSize))
+            if (fSortedByFee && (dPriorityDelta <= 0) && (nFeeDelta <= 0) && (feeRate < ::minRelayTxFee) && (nBlockSize + nTxSize >= nBlockMinSize))
                 continue;
 
             // Prioritise by fee once past the priority size or we run out of high-priority
@@ -314,47 +300,6 @@ CBlockTemplate* CreateNewBlock(const CScript& scriptPubKeyIn, CWallet* pwallet, 
 
             if (!view.HaveInputs(tx))
                 continue;
-
-            // double check that there are no double spent zPIV spends in this block or tx
-            if (tx.HasZerocoinSpendInputs()) {
-                int nHeightTx = 0;
-                if (IsTransactionInChain(tx.GetHash(), nHeightTx))
-                    continue;
-
-                bool fDoubleSerial = false;
-                for (const CTxIn& txIn : tx.vin) {
-                    bool isPublicSpend = txIn.IsZerocoinPublicSpend();
-                    if (txIn.IsZerocoinSpend() || isPublicSpend) {
-                        libzerocoin::CoinSpend* spend;
-                        if (isPublicSpend) {
-                            libzerocoin::ZerocoinParams* params = consensus.Zerocoin_Params(false);
-                            PublicCoinSpend publicSpend(params);
-                            CValidationState state;
-                            if (!ZPIVModule::ParseZerocoinPublicSpend(txIn, tx, state, publicSpend)){
-                                throw std::runtime_error("Invalid public spend parse");
-                            }
-                            spend = &publicSpend;
-                        } else {
-                            libzerocoin::CoinSpend spendObj = TxInToZerocoinSpend(txIn);
-                            spend = &spendObj;
-                        }
-
-                        bool fUseV1Params = spend->getCoinVersion() < libzerocoin::PrivateCoin::PUBKEY_VERSION;
-                        if (!spend->HasValidSerial(consensus.Zerocoin_Params(fUseV1Params)))
-                            fDoubleSerial = true;
-                        if (std::count(vBlockSerials.begin(), vBlockSerials.end(), spend->getCoinSerialNumber()))
-                            fDoubleSerial = true;
-                        if (std::count(vTxSerials.begin(), vTxSerials.end(), spend->getCoinSerialNumber()))
-                            fDoubleSerial = true;
-                        if (fDoubleSerial)
-                            break;
-                        vTxSerials.emplace_back(spend->getCoinSerialNumber());
-                    }
-                }
-                //This zPIV serial has already been included in the block, do not add this tx.
-                if (fDoubleSerial)
-                    continue;
-            }
 
             CAmount nTxFees = view.GetValueIn(tx) - tx.GetValueOut();
 
@@ -382,9 +327,6 @@ CBlockTemplate* CreateNewBlock(const CScript& scriptPubKeyIn, CWallet* pwallet, 
             nBlockSigOps += nTxSigOps;
             nFees += nTxFees;
 
-            for (const CBigNum& bnSerial : vTxSerials)
-                vBlockSerials.emplace_back(bnSerial);
-
             if (fPrintPriority) {
                 LogPrintf("priority %.1f fee %s txid %s\n",
                     dPriority, feeRate.ToString(), tx.GetHash().ToString());
@@ -406,7 +348,7 @@ CBlockTemplate* CreateNewBlock(const CScript& scriptPubKeyIn, CWallet* pwallet, 
 
         if (!fProofOfStake) {
             //Masternode and general budget payments
-            FillBlockPayee(txNew, nFees, fProofOfStake, false);
+            FillBlockPayee(txNew, nFees, fProofOfStake);
 
             //Make payee
             if (txNew.vout.size() > 1) {

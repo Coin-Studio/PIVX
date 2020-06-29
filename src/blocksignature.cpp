@@ -4,7 +4,6 @@
 
 #include "blocksignature.h"
 #include "main.h"
-#include "zpivchain.h"
 
 bool SignBlockWithKey(CBlock& block, const CKey& key)
 {
@@ -47,32 +46,24 @@ bool CheckBlockSignature(const CBlock& block)
     if (block.vchBlockSig.empty())
         return error("%s: vchBlockSig is empty!", __func__);
 
-    /** Each block is signed by the private key of the input that is staked. This can be either zPIV or normal UTXO
-     *  zPIV: Each zPIV has a keypair associated with it. The serial number is a hash of the public key.
-     *  UTXO: The public key that signs must match the public key associated with the first utxo of the coinstake tx.
-     */
     CPubKey pubkey;
-    bool fzPIVStake = block.vtx[1].vin[0].IsZerocoinSpend();
-    if (fzPIVStake) {
-        libzerocoin::CoinSpend spend = TxInToZerocoinSpend(block.vtx[1].vin[0]);
-        pubkey = spend.getPubKey();
-    } else {
-        txnouttype whichType;
-        std::vector<valtype> vSolutions;
-        const CTxOut& txout = block.vtx[1].vout[1];
-        if (!Solver(txout.scriptPubKey, whichType, vSolutions))
-            return false;
-        if (whichType == TX_PUBKEY || whichType == TX_PUBKEYHASH) {
-            valtype& vchPubKey = vSolutions[0];
-            pubkey = CPubKey(vchPubKey);
-        } else if (whichType == TX_COLDSTAKE) {
-            // pick the public key from the P2CS input
-            const CTxIn& txin = block.vtx[1].vin[0];
-            int start = 1 + (int) *txin.scriptSig.begin(); // skip sig
-            start += 1 + (int) *(txin.scriptSig.begin()+start); // skip flag
-            pubkey = CPubKey(txin.scriptSig.begin()+start+1, txin.scriptSig.end());
-        }
-    }
+
+	txnouttype whichType;
+	std::vector<valtype> vSolutions;
+	const CTxOut& txout = block.vtx[1].vout[1];
+	if (!Solver(txout.scriptPubKey, whichType, vSolutions))
+		return false;
+	if (whichType == TX_PUBKEY || whichType == TX_PUBKEYHASH) {
+		valtype& vchPubKey = vSolutions[0];
+		pubkey = CPubKey(vchPubKey);
+	} else if (whichType == TX_COLDSTAKE) {
+		// pick the public key from the P2CS input
+		const CTxIn& txin = block.vtx[1].vin[0];
+		int start = 1 + (int) *txin.scriptSig.begin(); // skip sig
+		start += 1 + (int) *(txin.scriptSig.begin()+start); // skip flag
+		pubkey = CPubKey(txin.scriptSig.begin()+start+1, txin.scriptSig.end());
+	}
+
 
     if (!pubkey.IsValid())
         return error("%s: invalid pubkey %s", __func__, HexStr(pubkey));

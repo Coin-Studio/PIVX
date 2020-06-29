@@ -23,7 +23,6 @@
 #include "wallet/walletdb.h" // for BackupWallet
 #include <stdint.h>
 #include <iostream>
-#include "zpiv/deterministicmint.h"
 
 #include <QDebug>
 #include <QSet>
@@ -133,16 +132,6 @@ CAmount WalletModel::getImmatureBalance() const
 CAmount WalletModel::getLockedBalance() const
 {
     return wallet->GetLockedCoins();
-}
-
-CAmount WalletModel::getZerocoinBalance() const
-{
-    return wallet->GetZerocoinBalance(false);
-}
-
-CAmount WalletModel::getUnconfirmedZerocoinBalance() const
-{
-    return wallet->GetUnconfirmedZerocoinBalance();
 }
 
 CAmount WalletModel::getImmatureZerocoinBalance() const
@@ -255,7 +244,6 @@ void WalletModel::emitBalanceChanged()
     // TODO: Improve all of this..
     // Force update of UI elements even when no values have changed
     Q_EMIT balanceChanged(cachedBalance, cachedUnconfirmedBalance, cachedImmatureBalance,
-                        cachedZerocoinBalance, cachedUnconfirmedZerocoinBalance, cachedImmatureZerocoinBalance,
                         cachedWatchOnlyBalance, cachedWatchUnconfBalance, cachedWatchImmatureBalance,
                         cachedDelegatedBalance, cachedColdStakedBalance);
 }
@@ -267,10 +255,6 @@ void WalletModel::checkBalanceChanged()
 
     CAmount newBalance = getBalance();
     CAmount newUnconfirmedBalance = getUnconfirmedBalance();
-    CAmount newImmatureBalance = getImmatureBalance();
-    CAmount newZerocoinBalance = getZerocoinBalance();
-    CAmount newUnconfirmedZerocoinBalance = getUnconfirmedZerocoinBalance();
-    CAmount newImmatureZerocoinBalance = getImmatureZerocoinBalance();
     CAmount newWatchOnlyBalance = 0;
     CAmount newWatchUnconfBalance = 0;
     CAmount newWatchImmatureBalance = 0;
@@ -286,15 +270,11 @@ void WalletModel::checkBalanceChanged()
     }
 
     if (cachedBalance != newBalance || cachedUnconfirmedBalance != newUnconfirmedBalance || cachedImmatureBalance != newImmatureBalance ||
-        cachedZerocoinBalance != newZerocoinBalance || cachedUnconfirmedZerocoinBalance != newUnconfirmedZerocoinBalance || cachedImmatureZerocoinBalance != newImmatureZerocoinBalance ||
         cachedWatchOnlyBalance != newWatchOnlyBalance || cachedWatchUnconfBalance != newWatchUnconfBalance || cachedWatchImmatureBalance != newWatchImmatureBalance ||
         cachedTxLocks != nCompleteTXLocks || cachedDelegatedBalance != newDelegatedBalance || cachedColdStakedBalance != newColdStakedBalance) {
         cachedBalance = newBalance;
         cachedUnconfirmedBalance = newUnconfirmedBalance;
         cachedImmatureBalance = newImmatureBalance;
-        cachedZerocoinBalance = newZerocoinBalance;
-        cachedUnconfirmedZerocoinBalance = newUnconfirmedZerocoinBalance;
-        cachedImmatureZerocoinBalance = newImmatureZerocoinBalance;
         cachedTxLocks = nCompleteTXLocks;
         cachedWatchOnlyBalance = newWatchOnlyBalance;
         cachedWatchUnconfBalance = newWatchUnconfBalance;
@@ -302,7 +282,6 @@ void WalletModel::checkBalanceChanged()
         cachedColdStakedBalance = newColdStakedBalance;
         cachedDelegatedBalance = newDelegatedBalance;
         Q_EMIT balanceChanged(newBalance, newUnconfirmedBalance, newImmatureBalance,
-                            newZerocoinBalance, newUnconfirmedZerocoinBalance, newImmatureZerocoinBalance,
                             newWatchOnlyBalance, newWatchUnconfBalance, newWatchImmatureBalance,
                             newDelegatedBalance, newColdStakedBalance);
     }
@@ -371,11 +350,6 @@ void WalletModel::updateMultiSigFlag(bool fHaveMultiSig)
 {
     this->fHaveMultiSig = fHaveMultiSig;
     Q_EMIT notifyMultiSigChanged(fHaveMultiSig);
-}
-
-bool WalletModel::getMint(const uint256& hashSerial, CZerocoinMint& mint)
-{
-    return wallet->GetMint(hashSerial, mint);
 }
 
 bool WalletModel::validateAddress(const QString& address)
@@ -552,7 +526,7 @@ WalletModel::SendCoinsReturn WalletModel::sendCoins(WalletModelTransaction& tran
 
     // Double check tx before do anything
     CValidationState state;
-    if (!CheckTransaction(*transaction.getTransaction(), true, state, fColdStakingActive)) {
+    if (!CheckTransaction(*transaction.getTransaction(), state, fColdStakingActive)) {
         return TransactionCommitFailed;
     }
 
@@ -608,9 +582,6 @@ const CWalletTx* WalletModel::getTx(uint256 id)
 
 bool WalletModel::mintCoins(CAmount value, CCoinControl* coinControl ,std::string &strError)
 {
-    CWalletTx wtx;
-    std::vector<CDeterministicMint> vMints;
-    strError = wallet->MintZerocoin(value, wtx, vMints, coinControl);
     return strError.empty();
 }
 
@@ -650,7 +621,7 @@ bool WalletModel::createZpivSpend(
 
     // Double check tx before do anything
     CValidationState state;
-    return CheckTransaction(wtxNew, true, state);
+    return CheckTransaction(wtxNew, state);
 }
 
 bool WalletModel::sendZpiv(
@@ -659,22 +630,7 @@ bool WalletModel::sendZpiv(
         std::list<std::pair<CBitcoinAddress*, CAmount>> outputs,
         std::string changeAddress)
 {
-    CBitcoinAddress *changeAdd = (!changeAddress.empty()) ? new CBitcoinAddress(changeAddress) : nullptr;
-    CAmount value = 0;
-    for (std::pair<CBitcoinAddress*, CAmount> pair : outputs) {
-        value += pair.second;
-    }
-
-    CWalletTx wtxNew;
-    return wallet->SpendZerocoin(
-            value,
-            wtxNew,
-            receipt,
-            vMintsSelected,
-            outputs,
-            changeAdd
-    );
-
+    return true;
 }
 
 bool WalletModel::convertBackZpiv(
@@ -682,15 +638,7 @@ bool WalletModel::convertBackZpiv(
         std::vector<CZerocoinMint> &vMintsSelected,
         CZerocoinSpendReceipt &receipt)
 {
-    CWalletTx wtxNew;
-    return wallet->SpendZerocoin(
-            value,
-            wtxNew,
-            receipt,
-            vMintsSelected,
-            std::list<std::pair<CBitcoinAddress*, CAmount>>(),
-            nullptr
-    );
+    return true;
 }
 
 OptionsModel* WalletModel::getOptionsModel()

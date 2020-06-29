@@ -30,7 +30,6 @@ LIBBITCOIN_COMMON=libbitcoin_common.a
 LIBBITCOIN_CLI=libbitcoin_cli.a
 LIBBITCOIN_UTIL=libbitcoin_util.a
 LIBBITCOIN_CRYPTO=crypto/libbitcoin_crypto.a
-LIBBITCOIN_ZEROCOIN=libzerocoin/libbitcoin_zerocoin.a
 LIBBITCOINQT=qt/libbitcoinqt.a
 LIBSECP256K1=secp256k1/libsecp256k1.la
 
@@ -103,7 +102,6 @@ BITCOIN_CORE_H = \
   consensus/merkle.h \
   consensus/validation.h \
   consensus/tx_verify.h \
-  consensus/zerocoin_verify.h \
   consensus/params.h \
   primitives/block.h \
   primitives/transaction.h \
@@ -111,7 +109,6 @@ BITCOIN_CORE_H = \
   crypter.h \
   pairresult.h \
   addressbook.h \
-  denomination_functions.h \
   wallet/db.h \
   hash.h \
   httprpc.h \
@@ -189,14 +186,6 @@ BITCOIN_CORE_H = \
   wallet/wallet.h \
   wallet/wallet_ismine.h \
   wallet/walletdb.h \
-  zpivchain.h \
-  zpiv/deterministicmint.h \
-  zpiv/mintpool.h \
-  zpiv/zerocoin.h \
-  zpiv/zpivtracker.h \
-  zpiv/zpivwallet.h \
-  zpiv/zpivmodule.h \
-  zpiv/zpos.h \
   zmq/zmqabstractnotifier.h \
   zmq/zmqconfig.h \
   zmq/zmqnotificationinterface.h \
@@ -218,7 +207,6 @@ libbitcoin_server_a_SOURCES = \
   chain.cpp \
   checkpoints.cpp \
   consensus/tx_verify.cpp \
-  consensus/zerocoin_verify.cpp \
   httprpc.cpp \
   httpserver.cpp \
   init.cpp \
@@ -245,7 +233,6 @@ libbitcoin_server_a_SOURCES = \
   txdb.cpp \
   txmempool.cpp \
   validationinterface.cpp \
-  zpivchain.cpp \
   $(BITCOIN_CORE_H)
 
 if ENABLE_ZMQ
@@ -264,7 +251,6 @@ libbitcoin_wallet_a_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
 libbitcoin_wallet_a_SOURCES = \
   activemasternode.cpp \
   bip38.cpp \
-  denomination_functions.cpp \
   addressbook.cpp \
   crypter.cpp \
   key_io.cpp \
@@ -285,16 +271,8 @@ libbitcoin_wallet_a_SOURCES = \
   wallet/scriptpubkeyman.cpp \
   wallet/wallet.cpp \
   wallet/wallet_ismine.cpp \
-  wallet/wallet_zerocoin.cpp \
   wallet/walletdb.cpp \
-  zpiv/deterministicmint.cpp \
-  zpiv/zerocoin.cpp \
-  zpiv/mintpool.cpp \
-  zpiv/zpivwallet.cpp \
-  zpiv/zpivtracker.cpp \
   stakeinput.cpp \
-  zpiv/zpivmodule.cpp \
-  zpiv/zpos.cpp \
   $(BITCOIN_CORE_H)
 
 # crypto primitives library
@@ -335,36 +313,6 @@ crypto_libbitcoin_crypto_a_SOURCES = \
   crypto/sph_skein.h \
   crypto/sph_types.h
 
-# libzerocoin library
-libzerocoin_libbitcoin_zerocoin_a_CPPFLAGS = $(AM_CPPFLAGS) $(BOOST_CPPFLAGS)
-libzerocoin_libbitcoin_zerocoin_a_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
-libzerocoin_libbitcoin_zerocoin_a_SOURCES = \
-  libzerocoin/Accumulator.h \
-  libzerocoin/bignum.h \
-  libzerocoin/Coin.h \
-  libzerocoin/CoinRandomnessSchnorrSignature.h \
-  libzerocoin/CoinSpend.h \
-  libzerocoin/Commitment.h \
-  libzerocoin/Denominations.h \
-  libzerocoin/ParamGeneration.h \
-  libzerocoin/Params.h \
-  libzerocoin/SpendType.h \
-  libzerocoin/ZerocoinDefines.h \
-  libzerocoin/bignum.cpp \
-  libzerocoin/Accumulator.cpp \
-  libzerocoin/Coin.cpp \
-  libzerocoin/CoinRandomnessSchnorrSignature.cpp \
-  libzerocoin/CoinSpend.cpp \
-  libzerocoin/Denominations.cpp \
-  libzerocoin/ParamGeneration.cpp \
-  libzerocoin/Params.cpp
-if USE_NUM_GMP
-  libzerocoin_libbitcoin_zerocoin_a_SOURCES += libzerocoin/bignum_gmp.cpp
-endif
-if USE_NUM_OPENSSL
-  libzerocoin_libbitcoin_zerocoin_a_SOURCES += libzerocoin/bignum_openssl.cpp
-endif
-
 # common: shared between pivxd, and pivx-qt and non-server tools
 libbitcoin_common_a_CPPFLAGS = $(AM_CPPFLAGS) $(BITCOIN_INCLUDES)
 libbitcoin_common_a_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
@@ -378,9 +326,7 @@ libbitcoin_common_a_SOURCES = \
   compressor.cpp \
   consensus/merkle.cpp \
   primitives/block.cpp \
-  zpiv/deterministicmint.cpp \
   primitives/transaction.cpp \
-  zpiv/zerocoin.cpp \
   core_read.cpp \
   core_write.cpp \
   hash.cpp \
@@ -542,7 +488,6 @@ CLEANFILES += *.gcda *.gcno
 CLEANFILES += compat/*.gcda compat/*.gcno
 CLEANFILES += consensus/*.gcda consensus/*.gcno
 CLEANFILES += crypto/*.gcda crypto/*.gcno
-CLEANFILES += libzerocoin/*.gcda libzerocoin/*.gcno
 CLEANFILES += primitives/*.gcda primitives/*.gcno
 CLEANFILES += rpc/*.gcda rpc/*.gcno
 CLEANFILES += script/*.gcda script/*.gcno
@@ -551,7 +496,6 @@ CLEANFILES += univalue/*.gcda univalue/*.gcno
 CLEANFILES += wallet/*.gcda wallet/*.gcno
 CLEANFILES += wallet/test/*.gcda wallet/test/*.gcno
 CLEANFILES += zmq/*.gcda zmq/*.gcno
-CLEANFILES += zpiv/*.gcda zpiv/*.gcno
 CLEANFILES += obj/build.h
 
 EXTRA_DIST =

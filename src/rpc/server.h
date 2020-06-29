@@ -8,7 +8,6 @@
 #define BITCOIN_RPCSERVER_H
 
 #include "amount.h"
-#include "zpiv/zerocoin.h"
 #include "rpc/protocol.h"
 #include "uint256.h"
 
@@ -181,7 +180,6 @@ extern std::string HelpExampleRpc(std::string methodname, std::string args);
 extern void EnsureWalletIsUnlocked(bool fAllowAnonOnly = false);
 // Ensure the wallet's existence.
 extern void EnsureWallet();
-extern UniValue DoZpivSpend(const CAmount nAmount, std::vector<CZerocoinMint>& vMintsSelected, std::string address_str);
 
 extern UniValue getconnectioncount(const UniValue& params, bool fHelp); // in rpc/net.cpp
 extern UniValue getpeerinfo(const UniValue& params, bool fHelp);
@@ -265,26 +263,6 @@ extern UniValue setstakesplitthreshold(const UniValue& params, bool fHelp);
 extern UniValue getstakesplitthreshold(const UniValue& params, bool fHelp);
 extern UniValue multisend(const UniValue& params, bool fHelp);
 extern UniValue autocombinerewards(const UniValue& params, bool fHelp);
-extern UniValue getzerocoinbalance(const UniValue& params, bool fHelp);
-extern UniValue listmintedzerocoins(const UniValue& params, bool fHelp);
-extern UniValue listspentzerocoins(const UniValue& params, bool fHelp);
-extern UniValue listzerocoinamounts(const UniValue& params, bool fHelp);
-extern UniValue mintzerocoin(const UniValue& params, bool fHelp);
-extern UniValue spendzerocoin(const UniValue& params, bool fHelp);
-extern UniValue spendrawzerocoin(const UniValue& params, bool fHelp);
-extern UniValue spendzerocoinmints(const UniValue& params, bool fHelp);
-extern UniValue resetmintzerocoin(const UniValue& params, bool fHelp);
-extern UniValue resetspentzerocoin(const UniValue& params, bool fHelp);
-extern UniValue getarchivedzerocoin(const UniValue& params, bool fHelp);
-extern UniValue importzerocoins(const UniValue& params, bool fHelp);
-extern UniValue exportzerocoins(const UniValue& params, bool fHelp);
-extern UniValue reconsiderzerocoins(const UniValue& params, bool fHelp);
-extern UniValue getspentzerocoinamount(const UniValue& params, bool fHelp);
-extern UniValue setzpivseed(const UniValue& params, bool fHelp);
-extern UniValue getzpivseed(const UniValue& params, bool fHelp);
-extern UniValue generatemintlist(const UniValue& params, bool fHelp);
-extern UniValue searchdzpiv(const UniValue& params, bool fHelp);
-extern UniValue dzpivstate(const UniValue& params, bool fHelp);
 
 extern UniValue getrawtransaction(const UniValue& params, bool fHelp); // in rpc/rawtransaction.cpp
 extern UniValue listunspent(const UniValue& params, bool fHelp);
@@ -295,9 +273,7 @@ extern UniValue decoderawtransaction(const UniValue& params, bool fHelp);
 extern UniValue decodescript(const UniValue& params, bool fHelp);
 extern UniValue signrawtransaction(const UniValue& params, bool fHelp);
 extern UniValue sendrawtransaction(const UniValue& params, bool fHelp);
-extern UniValue createrawzerocoinspend(const UniValue& params, bool fHelp);
 
-extern UniValue findserial(const UniValue& params, bool fHelp); // in rpc/blockchain.cpp
 extern UniValue getblockcount(const UniValue& params, bool fHelp);
 extern UniValue getbestblockhash(const UniValue& params, bool fHelp);
 extern UniValue waitfornewblock(const UniValue& params, bool fHelp);
@@ -310,15 +286,12 @@ extern UniValue getrawmempool(const UniValue& params, bool fHelp);
 extern UniValue getblockhash(const UniValue& params, bool fHelp);
 extern UniValue getblock(const UniValue& params, bool fHelp);
 extern UniValue getblockheader(const UniValue& params, bool fHelp);
-extern UniValue getfeeinfo(const UniValue& params, bool fHelp);
 extern UniValue gettxoutsetinfo(const UniValue& params, bool fHelp);
 extern UniValue gettxout(const UniValue& params, bool fHelp);
 extern UniValue verifychain(const UniValue& params, bool fHelp);
 extern UniValue getchaintips(const UniValue& params, bool fHelp);
 extern UniValue invalidateblock(const UniValue& params, bool fHelp);
 extern UniValue reconsiderblock(const UniValue& params, bool fHelp);
-extern UniValue getblockindexstats(const UniValue& params, bool fHelp);
-extern UniValue getserials(const UniValue& params, bool fHelp);
 extern void validaterange(const UniValue& params, int& heightStart, int& heightEnd, int minHeightStart=1);
 
 // in rpc/masternode.cpp

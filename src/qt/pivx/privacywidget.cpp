@@ -236,11 +236,6 @@ void PrivacyWidget::onSendClicked()
     if (!walletModel || !walletModel->getOptionsModel())
         return;
 
-    if (sporkManager.IsSporkActive(SPORK_16_ZEROCOIN_MAINTENANCE_MODE)) {
-        warn(tr("Zerocoin"), tr("zPIV is currently undergoing maintenance"));
-        return;
-    }
-
     // Only convert enabled.
     bool isConvert = true;// ui->pushLeft->isChecked();
 
@@ -344,93 +339,7 @@ void PrivacyWidget::onResetZeroClicked()
 
 void PrivacyWidget::updateDenomsSupply()
 {
-    std::map<libzerocoin::CoinDenomination, CAmount> mapDenomBalances;
-    std::map<libzerocoin::CoinDenomination, int> mapUnconfirmed;
-    std::map<libzerocoin::CoinDenomination, int> mapImmature;
-    for (const auto& denom : libzerocoin::zerocoinDenomList) {
-        mapDenomBalances.insert(std::make_pair(denom, 0));
-        mapUnconfirmed.insert(std::make_pair(denom, 0));
-        mapImmature.insert(std::make_pair(denom, 0));
-    }
-
-    std::set<CMintMeta> vMints;
-    walletModel->listZerocoinMints(vMints, true, false, true, true);
-    const int nRequiredConfs = Params().GetConsensus().ZC_MinMintConfirmations;
-
-    for (auto& meta : vMints) {
-        // All denominations
-        mapDenomBalances.at(meta.denom)++;
-
-        if (!meta.nHeight || chainActive.Height() - meta.nHeight <= nRequiredConfs) {
-            // All unconfirmed denominations
-            mapUnconfirmed.at(meta.denom)++;
-        } else {
-            if (meta.denom == libzerocoin::CoinDenomination::ZQ_ERROR) {
-                mapImmature.at(meta.denom)++;
-            }
-        }
-    }
-
-    int64_t nCoins = 0;
-    int64_t nSumPerCoin = 0;
-    int64_t nUnconfirmed = 0;
-    int64_t nImmature = 0;
-    QString strDenomStats, strUnconfirmed = "";
-
-    for (const auto& denom : libzerocoin::zerocoinDenomList) {
-        nCoins = libzerocoin::ZerocoinDenominationToInt(denom);
-        nSumPerCoin = nCoins * mapDenomBalances.at(denom);
-        nUnconfirmed = mapUnconfirmed.at(denom);
-        nImmature = mapImmature.at(denom);
-
-        strUnconfirmed = "";
-        if (nUnconfirmed) {
-            strUnconfirmed += QString::number(nUnconfirmed) + QString(" unconf. ");
-        }
-        if (nImmature) {
-            strUnconfirmed += QString::number(nImmature) + QString(" immature ");
-        }
-        if (nImmature || nUnconfirmed) {
-            strUnconfirmed = QString("( ") + strUnconfirmed + QString(") ");
-        }
-
-        strDenomStats = strUnconfirmed + QString::number(mapDenomBalances.at(denom)) + " x " +
-                        QString::number(nCoins) + " = <b>" +
-                        QString::number(nSumPerCoin) + " zPIV </b>";
-
-        switch (nCoins) {
-            case libzerocoin::CoinDenomination::ZQ_ONE:
-                ui->labelValueDenom1->setText(strDenomStats);
-                break;
-            case libzerocoin::CoinDenomination::ZQ_FIVE:
-                ui->labelValueDenom5->setText(strDenomStats);
-                break;
-            case libzerocoin::CoinDenomination::ZQ_TEN:
-                ui->labelValueDenom10->setText(strDenomStats);
-                break;
-            case libzerocoin::CoinDenomination::ZQ_FIFTY:
-                ui->labelValueDenom50->setText(strDenomStats);
-                break;
-            case libzerocoin::CoinDenomination::ZQ_ONE_HUNDRED:
-                ui->labelValueDenom100->setText(strDenomStats);
-                break;
-            case libzerocoin::CoinDenomination::ZQ_FIVE_HUNDRED:
-                ui->labelValueDenom500->setText(strDenomStats);
-                break;
-            case libzerocoin::CoinDenomination::ZQ_ONE_THOUSAND:
-                ui->labelValueDenom1000->setText(strDenomStats);
-                break;
-            case libzerocoin::CoinDenomination::ZQ_FIVE_THOUSAND:
-                ui->labelValueDenom5000->setText(strDenomStats);
-                break;
-            default:
-                // Error Case: don't update display
-                break;
-        }
-    }
-
-    CAmount matureZerocoinBalance = walletModel->getZerocoinBalance() - walletModel->getUnconfirmedZerocoinBalance() - walletModel->getImmatureZerocoinBalance();
-    ui->btnTotalzPIV->setTitleText(tr("Total %1").arg(GUIUtil::formatBalance(matureZerocoinBalance, nDisplayUnit, true)));
+ 
 }
 
 void PrivacyWidget::changeTheme(bool isLightTheme, QString& theme)

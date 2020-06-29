@@ -66,15 +66,6 @@ bool Solver(const CScript& scriptPubKey, txnouttype& typeRet, std::vector<std::v
         return true;
     }
 
-    // Zerocoin
-    if (scriptPubKey.IsZerocoinMint()) {
-        typeRet = TX_ZEROCOINMINT;
-        if(scriptPubKey.size() > 150) return false;
-        std::vector<unsigned char> hashBytes(scriptPubKey.begin()+2, scriptPubKey.end());
-        vSolutionsRet.push_back(hashBytes);
-        return true;
-    }
-
     // Provably prunable, data-carrying output
     //
     // So long as script passes the IsUnspendable() test and all but the first

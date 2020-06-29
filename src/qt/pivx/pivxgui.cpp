@@ -585,16 +585,6 @@ bool PIVXGUI::addWallet(const QString& name, WalletModel* walletModel)
     coldStakingWidget->setWalletModel(walletModel);
     settingsWidget->setWalletModel(walletModel);
 
-    // Privacy screen
-    if (walletModel->getZerocoinBalance() > 0) {
-        privacyWidget = new PrivacyWidget(this);
-        stackedContainer->addWidget(privacyWidget);
-
-        privacyWidget->setWalletModel(walletModel);
-        connect(privacyWidget, &PrivacyWidget::message, this, &PIVXGUI::message);
-        connect(privacyWidget, &PrivacyWidget::showHide, this, &PIVXGUI::showHide);
-    }
-
     // Connect actions..
     connect(masterNodesWidget, &MasterNodesWidget::message, this, &PIVXGUI::message);
     connect(coldStakingWidget, &ColdStakingWidget::message, this, &PIVXGUI::message);
