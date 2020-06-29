@@ -39,7 +39,6 @@ struct Params {
 
     // height-based activations
     int height_last_PoW;
-    int height_last_ZC_AccumCheckpoint;
     
     int64_t TargetTimespan() const { return nTargetTimespan; }
     uint256 ProofOfStakeLimit() const { return posLimit; }

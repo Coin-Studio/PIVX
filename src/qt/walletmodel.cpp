@@ -593,35 +593,7 @@ bool WalletModel::createZpivSpend(
         std::list<std::pair<CBitcoinAddress*, CAmount>> outputs,
         std::string changeAddress)
 {
-    CBitcoinAddress *changeAdd = (!changeAddress.empty()) ? new CBitcoinAddress(changeAddress) : nullptr;
-    CAmount value = 0;
-    for (std::pair<CBitcoinAddress*, CAmount> pair : outputs) {
-        value += pair.second;
-    }
-
-    if (wallet->IsLocked()) {
-        receipt.SetStatus("Error: Wallet locked, unable to create transaction!", ZPIV_WALLET_LOCKED);
-        return false;
-    }
-
-    CReserveKey reserveKey(wallet);
-    std::vector<CDeterministicMint> vNewMints;
-    if (!wallet->CreateZCPublicSpendTransaction(
-            value,
-            wtxNew,
-            reserveKey,
-            receipt,
-            vMintsSelected,
-            vNewMints,
-            outputs,
-            changeAdd
-    )) {
-        return false;
-    }
-
-    // Double check tx before do anything
-    CValidationState state;
-    return CheckTransaction(wtxNew, state);
+	return true;
 }
 
 bool WalletModel::sendZpiv(
