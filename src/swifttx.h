@@ -94,12 +94,7 @@ public:
         READWRITE(vinMasternode);
         READWRITE(vchSig);
         READWRITE(nBlockHeight);
-        try
-        {
-            READWRITE(nMessVersion);
-        } catch (...) {
-            nMessVersion = MessageVersion::MESS_VER_STRMESS;
-        }
+        READWRITE(nMessVersion);
     }
 };
 

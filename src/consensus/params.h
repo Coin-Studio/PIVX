@@ -24,8 +24,6 @@ struct Params {
     int nBudgetCycleBlocks;
     int nBudgetFeeConfirmations;
     int nCoinbaseMaturity;
-    int nFutureTimeDriftPoW;
-    int nFutureTimeDriftPoS;
     int nMasternodeCountDrift;
     CAmount nMaxMoneyOut;
     int nPoolMaxTransactions;
@@ -44,27 +42,18 @@ struct Params {
     int height_last_ZC_AccumCheckpoint;
     int height_start_BIP65;                         // Blocks v5 start
     
-    int height_start_MessSignaturesV2;
-    int height_start_TimeProtoV2;                   // Blocks v7 start
-
     int64_t TargetTimespan() const { return nTargetTimespan; }
     uint256 ProofOfStakeLimit() const { return posLimit; }
     bool MoneyRange(const CAmount& nValue) const { return (nValue >= 0 && nValue <= nMaxMoneyOut); }
-    bool IsMessSigV2(const int nHeight) const { return nHeight >= height_start_MessSignaturesV2; }
-    bool IsTimeProtocolV2(const int nHeight) const { return nHeight >= height_start_TimeProtoV2; }
 
     int FutureBlockTimeDrift(const int nHeight) const
     {
         // PoS (TimeV2): 14 seconds
-        if (IsTimeProtocolV2(nHeight)) return nTimeSlotLength - 1;
-        // PoS (TimeV1): 3 minutes - PoW: 2 hours
-        return (nHeight > height_last_PoW ? nFutureTimeDriftPoS : nFutureTimeDriftPoW);
+        return nTimeSlotLength - 1;
     }
 
     bool IsValidBlockTimeStamp(const int64_t nTime, const int nHeight) const
     {
-        // Before time protocol V2, blocks can have arbitrary timestamps
-        if (!IsTimeProtocolV2(nHeight)) return true;
         // Time protocol v2 requires time in slots
         return (nTime % nTimeSlotLength) == 0;
     }
