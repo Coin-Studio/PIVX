@@ -20,8 +20,7 @@ struct Params {
     uint256 hashGenesisBlock;
     bool fPowAllowMinDifficultyBlocks;
     uint256 powLimit;
-    uint256 posLimitV1;
-    uint256 posLimitV2;
+    uint256 posLimit;
     int nBudgetCycleBlocks;
     int nBudgetFeeConfirmations;
     int nCoinbaseMaturity;
@@ -34,7 +33,6 @@ struct Params {
     int nStakeMinAge;
     int nStakeMinDepth;
     int64_t nTargetTimespan;
-    int64_t nTargetTimespanV2;
     int64_t nTargetSpacing;
     int nTimeSlotLength;
 
@@ -47,12 +45,10 @@ struct Params {
     int height_start_BIP65;                         // Blocks v5 start
     
     int height_start_MessSignaturesV2;
-    int height_start_StakeModifierNewSelection;
-    int height_start_StakeModifierV2;               // Blocks v6 start
     int height_start_TimeProtoV2;                   // Blocks v7 start
 
-    int64_t TargetTimespan(const bool fV2 = true) const { return fV2 ? nTargetTimespanV2 : nTargetTimespan; }
-    uint256 ProofOfStakeLimit(const bool fV2) const { return fV2 ? posLimitV2 : posLimitV1; }
+    int64_t TargetTimespan() const { return nTargetTimespan; }
+    uint256 ProofOfStakeLimit() const { return posLimit; }
     bool MoneyRange(const CAmount& nValue) const { return (nValue >= 0 && nValue <= nMaxMoneyOut); }
     bool IsMessSigV2(const int nHeight) const { return nHeight >= height_start_MessSignaturesV2; }
     bool IsTimeProtocolV2(const int nHeight) const { return nHeight >= height_start_TimeProtoV2; }
@@ -73,13 +69,8 @@ struct Params {
         return (nTime % nTimeSlotLength) == 0;
     }
 
-    bool HasStakeMinAgeOrDepth(const int contextHeight, const uint32_t contextTime,
-            const int utxoFromBlockHeight, const uint32_t utxoFromBlockTime) const
+    bool HasStakeMinAgeOrDepth(const int contextHeight, const uint32_t contextTime, const int utxoFromBlockHeight, const uint32_t utxoFromBlockTime) const
     {
-        // before stake modifier V2, we require the utxo to be nStakeMinAge old
-        if (contextHeight < height_start_StakeModifierV2)
-            return (utxoFromBlockTime + nStakeMinAge <= contextTime);
-        // with stake modifier V2+, we require the utxo to be nStakeMinDepth deep in the chain
         return (contextHeight - utxoFromBlockHeight >= nStakeMinDepth);
     }
 };

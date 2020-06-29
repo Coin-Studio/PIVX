@@ -8,7 +8,6 @@
 #include "kernel.h"
 
 #include "db.h"
-#include "legacy/stakemodifier.h"
 #include "script/interpreter.h"
 #include "util.h"
 #include "stakeinput.h"
@@ -31,16 +30,7 @@ CStakeKernel::CStakeKernel(const CBlockIndex* const pindexPrev, CStakeInput* sta
     stakeValue(stakeInput->GetValue())
 {
     // Set kernel stake modifier
-    if (pindexPrev->nHeight + 1 < Params().GetConsensus().height_start_StakeModifierV2) {
-        uint64_t nStakeModifier = 0;
-        if (!GetOldStakeModifier(stakeInput, nStakeModifier))
-            LogPrintf("%s : ERROR: Failed to get kernel stake modifier\n", __func__);
-        // Modifier v1
-        stakeModifier << nStakeModifier;
-    } else {
-        // Modifier v2
-        stakeModifier << pindexPrev->GetStakeModifierV2();
-    }
+    stakeModifier << pindexPrev->GetStakeModifier();
     CBlockIndex* pindexFrom = stakeInput->GetIndexFrom();
     nTimeBlockFrom = pindexFrom->nTime;
 }

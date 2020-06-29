@@ -250,12 +250,9 @@ public:
     unsigned int GetStakeEntropyBit() const;
     bool SetStakeEntropyBit(unsigned int nEntropyBit);
     bool GeneratedStakeModifier() const { return (nFlags & BLOCK_STAKE_MODIFIER); }
-    void SetStakeModifier(const uint64_t nStakeModifier, bool fGeneratedStakeModifier);
-    void SetNewStakeModifier();                             // generates and sets new v1 modifier
     void SetStakeModifier(const uint256& nStakeModifier);
-    void SetNewStakeModifier(const uint256& prevoutId);     // generates and sets new v2 modifier
-    uint64_t GetStakeModifierV1() const;
-    uint256 GetStakeModifierV2() const;
+    void SetNewStakeModifier(const uint256& prevoutId);     // generates and sets v2 modifier
+    uint256 GetStakeModifier() const;
 
     //! Check whether this block index entry is valid up to the passed validity level.
     bool IsValid(enum BlockStatus nUpTo = BLOCK_VALID_TRANSACTIONS) const;
@@ -310,15 +307,11 @@ public:
 		READWRITE(nMint);
 		READWRITE(nMoneySupply);
 		READWRITE(nFlags);
-		if (nHeight < Params().GetConsensus().height_start_StakeModifierV2) {
-			uint64_t nStakeModifier = 0;
-			READWRITE(nStakeModifier);
-			this->SetStakeModifier(nStakeModifier, this->GeneratedStakeModifier());
-		} else {
-			uint256 nStakeModifierV2;
-			READWRITE(nStakeModifierV2);
-			this->SetStakeModifier(nStakeModifierV2);
-		}
+
+		uint256 nStakeModifierV2;
+		READWRITE(nStakeModifierV2);
+		this->SetStakeModifier(nStakeModifierV2);
+		
 		if (IsProofOfStake()) {
 			COutPoint prevoutStake;
 			unsigned int nStakeTime = 0;
@@ -368,8 +361,7 @@ class CLegacyBlockIndex : public CBlockIndex
 public:
     uint256 hashNext{};
     uint256 hashPrev{};
-    uint64_t nStakeModifier = 0;
-    uint256 nStakeModifierV2{};
+    uint256 nStakeModifier{};
     COutPoint prevoutStake{};
     unsigned int nStakeTime = 0;
     int64_t nMoneySupply = 0;
@@ -401,11 +393,8 @@ public:
 		// Serialization with CLIENT_VERSION = 4009900-
 		READWRITE(nMoneySupply);
 		READWRITE(nFlags);
-		if (nHeight < Params().GetConsensus().height_start_StakeModifierV2) {
-			READWRITE(nStakeModifier);
-		} else {
-			READWRITE(nStakeModifierV2);
-		}
+		READWRITE(nStakeModifier);
+		
 		if (IsProofOfStake()) {
 			READWRITE(prevoutStake);
 			READWRITE(nStakeTime);
