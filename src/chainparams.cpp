@@ -176,8 +176,6 @@ public:
 
         // height-based activations
         consensus.height_last_PoW = 259200;   
-        consensus.height_start_BIP65 = 1808634;             // Block v5: 82629b7a9978f5c7ea3f70a12db92633a7d2e436711500db28b97efd48b1e527       
-
         
         /**
          * The message start string is designed to be unlikely to occur in normal data.
@@ -252,9 +250,7 @@ public:
         // height based activations
         consensus.height_last_PoW = 200;
         consensus.height_last_ZC_AccumCheckpoint = 1106090;
-        
-        consensus.height_start_BIP65 = 851019;                  // Block v5: d1ec8838ba8f644e78dd4f8e861d31e75457dfe607b31deade30e806b5f46c1c                
-
+                    
         /**
          * The message start string is designed to be unlikely to occur in normal data.
          * The characters are rarely used upper ASCII, not valid as UTF-8, and produce
@@ -334,9 +330,6 @@ public:
         
         // height based activations
         consensus.height_last_PoW = 250;
-
-        consensus.height_start_BIP65 = 851019;              // Not defined for regtest. Inherit TestNet value.       
-
       
         /**
          * The message start string is designed to be unlikely to occur in normal data.
